@@ -1,6 +1,5 @@
 import math
-from datasets import load_dataset, load_from_disk
-from custom_tokenizers.implementations import ByteLevelBPETokenizer
+from datasets import load_from_disk
 from transformers import Trainer, TrainingArguments, RobertaForMaskedLM
 from transformers import DataCollatorForLanguageModeling
 from transformers import RobertaConfig

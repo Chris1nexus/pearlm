@@ -1,17 +1,14 @@
 import math
 
-from custom_tokenizers import (
-    decoders,
+from pathlm.models.lm.do_not_remove_old.custom_tokenizers import (
     models,
     normalizers,
     pre_tokenizers,
-    processors,
     trainers,
     Tokenizer,
 )
 from datasets import load_dataset
-from transformers import AutoConfig, AutoModelForCausalLM, Trainer, TrainingArguments, AutoTokenizer, \
-    PreTrainedTokenizerFast
+from transformers import Trainer, TrainingArguments, PreTrainedTokenizerFast
 from transformers import DataCollatorForLanguageModeling
 from transformers import AutoConfig, AutoModelForMaskedLM
 
