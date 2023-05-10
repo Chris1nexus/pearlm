@@ -6,7 +6,7 @@ from collections import defaultdict
 from datasets import load_from_disk
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
     DataCollatorForLanguageModeling
-from pathlm.models.lm.do_not_remove_old.path_dataset import PathDataset
+from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.utils import check_dir, get_pid_to_eid
 
 

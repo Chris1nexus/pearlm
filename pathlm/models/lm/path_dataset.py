@@ -24,14 +24,19 @@ class PathDataset:
         path_list = path.split(" ")
         ans = []
         for pos, token in enumerate(path_list):
-            if pos % 2 == 0:
-                ans.append("<start_entity>")
+            # Handle user
+            if pos == 0:
+                ans.append(token)
+            # Handle recommendation
+            elif pos == len(path_list) - 1:
+                #ans.append("<recommendation>")
                 ans.append(self.eid2name[token])
-                ans.append("<end_entity>")
+            # Handle entity
+            elif pos % 2 == 0:
+                ans.append(self.eid2name[token])
+            # Handle relation
             else:
-                ans.append("<start_relation>")
                 ans.append(self.rid2name[token])
-                ans.append("<end_relation>")
         return " ".join(ans)
 
     def read_csv_as_dataframe(self, filename: str) -> pd.DataFrame:
