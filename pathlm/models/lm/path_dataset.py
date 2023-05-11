@@ -24,8 +24,8 @@ class PathDataset:
         path_list = path.split(" ")
         ans = []
         for pos, token in enumerate(path_list):
-            # Handle user
-            if pos == 0:
+            # Handle user and watched relation
+            if pos <= 1:
                 ans.append(token)
             # Handle recommendation
             elif pos == len(path_list) - 1:
