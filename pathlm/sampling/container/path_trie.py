@@ -1,4 +1,4 @@
-from models.PGPR.pgpr_utils import *    
+from pathlm.models.PGPR.pgpr_utils import *    
 
 
 
