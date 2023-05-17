@@ -1,6 +1,7 @@
 import os
 import argparse
-from models.model_statistics.container.kg_analyzer import KGstats
+from pathlm.models.PGPR.pgpr_utils import * 
+from pathlm.sampling.container.kg_analyzer import KGstats
 
 
 if __name__ == '__main__':
@@ -10,17 +11,15 @@ if __name__ == '__main__':
     parser.add_argument('--max_hop', type=int, default=3, help='Max number of hops.')
 
     args = parser.parse_args()
-
-    MODEL = 'kgat'
     ML1M = 'ml1m'
     LFM1M ='lfm1m'
     CELL='cellphones'
-    ROOT_DIR = os.environ('TREX_DATA_ROOT') if 'TREX_DATA_ROOT' in os.environ else '../..'
+    ROOT_DIR = os.environ('TREX_DATA_ROOT') if 'TREX_DATA_ROOT' in os.environ else '..'
     # Dataset directories.
     DATA_DIR = {
-        ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed/{MODEL}',
-        LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed/{MODEL}',
-        CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed/{MODEL}'
+        ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed',
+        LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed',
+        CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed'
     }
     dataset_name = 'ml1m'
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
