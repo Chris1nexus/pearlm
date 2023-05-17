@@ -58,7 +58,7 @@ if model_name in MLM_MODELS:
     )
 
 # Train model
-trainer.train()
+trainer.fine_tuning_train()
 
 # Evaluate model
 eval_results = trainer.evaluate()

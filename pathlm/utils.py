@@ -1,6 +1,12 @@
 import csv
+from collections import defaultdict
 from os.path import join
 import os
+from typing import Dict, List
+
+from tqdm import tqdm
+
+
 
 # Check if dir exists and create if not
 def check_dir(dir_path: str) -> None:
@@ -17,7 +23,7 @@ def normalise_name(name: str) -> str:
 def get_eid_to_name_map(data_dir: str) -> dict:
     e_map_path = join(data_dir, 'preprocessed', 'e_map.txt')
     eid2name = {}
-    with open(e_map_path) as f:
+    with open(e_map_path, 'r') as f:
         reader = csv.reader(f, delimiter='\t')
         next(reader, None)
         for row in reader:
@@ -54,3 +60,24 @@ def get_rid_to_name_map(data_dir: str) -> dict:
             rid2name[rid] = rname
     f.close()
     return rid2name
+
+def get_data_dir(dataset_name: str) -> str:
+    return join('data', dataset_name)
+
+def get_set(dataset_name: str, set_str: str='test') -> Dict[str, List[int]]:
+    data_dir = f"data/{dataset_name}"
+    # Note that test.txt has uid and pid from the original dataset so a convertion from dataset to entity id must be done
+    i2kg = get_pid_to_eid(data_dir)
+
+    # Generate paths for the test set
+    curr_set = defaultdict(list)
+    with open(f"{data_dir}/preprocessed/{set_str}.txt", "r") as f:
+        reader = csv.reader(f, delimiter="\t")
+        for row in reader:
+            user_id, item_id, rating, timestamp = row
+            user_id = str(int(user_id) - 1)  # user_id starts from 1 in the augmented graph starts from 0
+            item_id = i2kg[item_id]  # Converting dataset id to eid
+            curr_set[user_id].append(item_id)
+    f.close()
+    return curr_set
+

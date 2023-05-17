@@ -7,7 +7,7 @@ import pandas as pd
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 
 class PathDataset:
-    def __init__(self, dataset_name: str, base_data_dir: str=""):
+    def __init__(self, dataset_name: str, base_data_dir: str="", plain_text_path=False):
         self.dataset_name = dataset_name
         self.base_data_dir = base_data_dir
         self.data_dir = join(self.base_data_dir, "paths_random_walk")
@@ -17,10 +17,13 @@ class PathDataset:
         self.eid2name = get_eid_to_name_map(self.base_data_dir)
         self.rid2name = get_rid_to_name_map(self.base_data_dir)
 
-        self.dataset = self.dataset.map(lambda x: {"path": self.convert_numeric_path_to_textual_path(x["path"])})
+        if plain_text_path:
+            self.dataset = self.dataset.map(lambda x: {"path": self.convert_numeric_path_to_textual_path(x["path"])})
+        else:
+            self.dataset = self.dataset.map(lambda x: {"path": self.keep_numeric(x["path"])})
 
     # Based on the path struct, for now it is p to p
-    def convert_numeric_path_to_textual_path(self, path: str):
+    def convert_numeric_path_to_textual_path(self, path: str) -> str:
         path_list = path.split(" ")
         ans = []
         for pos, token in enumerate(path_list):
@@ -37,6 +40,28 @@ class PathDataset:
             # Handle relation
             else:
                 ans.append(self.rid2name[token])
+            ans.append("<word_end>")
+        return " ".join(ans)
+
+    def keep_numeric(self, path: str) -> str:
+        path_list = path.split(" ")
+        ans = []
+        for pos, token in enumerate(path_list):
+            # Handle user
+            if pos == 0:
+                ans.append(f"U{token}")
+            elif pos == 1:
+                ans.append(token)
+            # Handle recommendation
+            elif pos == 2 or pos == len(path_list) - 1:
+                #ans.append("<recommendation>")
+                ans.append(f"P{token}")
+            # Handle entity
+            elif pos % 2 == 0:
+                ans.append(f"E{token}")
+            # Handle relation
+            else:
+                ans.append(f"R{token}")
         return " ".join(ans)
 
     def read_csv_as_dataframe(self, filename: str) -> pd.DataFrame:

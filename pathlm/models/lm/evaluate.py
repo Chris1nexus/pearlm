@@ -1,93 +1,157 @@
 import argparse
 import csv
-from collections import defaultdict
+import random
 from typing import List, Dict
+from tqdm import tqdm
 
 import numpy as np
-from transformers import AutoTokenizer, set_seed, pipeline
+from transformers import AutoTokenizer, set_seed, pipeline, PreTrainedTokenizerFast, PhrasalConstraint
 
-from pathlm.utils import get_pid_to_eid, get_eid_to_name_map
+from pathlm.models.lm.generation_constraints import ForceLastTokenLogitsProcessorWordLevel, \
+    ForceTokenAtWordPositionLogitsProcessorBPE
+from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
+from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
+from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set
 
+from transformers import LogitsProcessorList
 
-def dcg_at_k(hit_list: List[int], k: int, method: int=1) -> float:
-    r = np.asfarray(hit_list)[:k]
-    if r.size:
-        if method == 0:
-            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
-        elif method == 1:
-            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
-        else:
-            raise ValueError('method must be 0 or 1.')
-    return 0.
+def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespace):
+    """
+    Recommendation and explanation generation
+    """
+    dataset_name = args.data
+    model_name = args.model
+    tokenizer = PreTrainedTokenizerFast(tokenizer_file=f"./tokenizers/{args.data}/WordLevel.json", max_len=256,
+                                        eos_token="[EOS]", bos_token="[BOS]",
+                                        pad_token="[PAD]", unk_token="[UNK]",
+                                        mask_token="[MASK]", use_fast=True)
 
+    user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
 
-def ndcg_at_k(hit_list: List[int], k: int, method=0) -> float:
-    dcg_max = dcg_at_k(sorted(hit_list, reverse=True), k, method)
-    if not dcg_max:
-        return 0.
-    return dcg_at_k(hit_list, k, method) / dcg_max
+    generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
+    set_seed(args.seed)
+    topk = {}
+    metrics = {"ndcg": [], "mmr": []}
+    for uid in tqdm(uids, desc="Generating topks", colour="green"):
+        # Define the logits processor
+        logits_processor = LogitsProcessorList([
+            ForceLastTokenLogitsProcessorWordLevel(user_negatives[uid], total_length=6)  # 7 = 2 input token + 5 generated tokens
+        ])
+        uid = str(int(uid) + 1)  # user_id starts from 1 in the augmented graph starts from 0
+        outputs = generator(f"U{uid} watched",
+                            max_length=7,  # 7 = 2 input token + 5 generated tokens
+                            num_return_sequences=10,
+                            logits_processor=logits_processor)
+        # Convert tokens to entity names
+        topk[uid] = []
+        for output in outputs:
+            output = output['generated_text'].split(" ")
+            recommended_item = output[-1][1:]
+            topk[uid].append(recommended_item)
 
-def mmr_at_k(hit_list: List[int], k: int) -> float:
-    r = np.asfarray(hit_list)[:k]
-    hit_idxs = np.nonzero(r)
-    if len(hit_idxs[0]) > 0:
-        return 1 / (hit_idxs[0][0] + 1)
-    return 0.
+    return topk
 
-def get_set(dataset_name: str, set: str='test') -> Dict[str, list[int]]:
-    data_dir = f"data/{dataset_name}"
-    # Note that test.txt has uid and pid from the original dataset so a convertion from dataset to entity id must be done
-    i2kg = get_pid_to_eid(data_dir)
+def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
+    """
+    Recommendation and explanation generation
+    """
+    dataset_name = args.data
+    tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
+    eid2name = get_eid_to_name_map(f"data/{dataset_name}")
+    name2id = {v: k for k, v in eid2name.items()}
 
-    # Generate paths for the test set
-    test_set = defaultdict(list)
-    with open(f"{data_dir}/preprocessed/{set}.txt", "r") as f:
-        reader = csv.reader(f, delimiter="\t")
-        for row in reader:
-            user_id, item_id, rating, timestamp = row
-            user_id = str(int(user_id) - 1)  # user_id starts from 1 in the augmented graph starts from 0
-            item_id = i2kg[item_id]  # Converting dataset id to eid
-            test_set[user_id].append(item_id)
-    f.close()
-    return test_set
+    user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
 
+    generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
+    set_seed(args.seed)
+    topks = {}
+    for uid in tqdm(uids, desc="Generating topks", colour="green"):
+        # Define the logits processor
+        logits_processor = LogitsProcessorList([
+            ForceTokenAtWordPositionLogitsProcessorBPE(tokenizer, user_negatives[uid], word_position=6)  # 7 = 2 input token + 5 generated tokens
+        ])
+        uid = str(int(uid) + 1)  # user_id starts from 1 in the augmented graph starts from 0
+        outputs = generator(f"U{uid} <word_end> watched",
+                            max_length=70,  # word != token so we need to increase the max_length
+                            num_return_sequences=20,
+                            logits_processor=logits_processor)
+        # Convert tokens to entity names
+        topks[uid] = []
+        for output in outputs:
+            if len(topks[uid]) == 10:
+                continue
+            output = output['generated_text'].split("<word_end>")[:7] #Hop 3
+            recommended_item = output[-1].strip()
+            try:
+                id = name2id[recommended_item]
+            except:
+                continue
+            topks[uid].append(id)
 
-def get_entity_vocab(dataset_name: str, model_name: str) -> List[int]:
-    fast_tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    entity_list = get_eid_to_name_map(dataset_name).values()
-    return fast_tokenizer.convert_tokens_to_ids(entity_list)
+    return topks
 
 def evaluate(model, args: argparse.Namespace):
     """
     Recommendation evaluation
     """
+    random_baseline(args)
     dataset_name = args.data
-    model_name = args.model
-
-    test_set = get_set(dataset_name, set='test')
-    entity_vocab = get_entity_vocab(dataset_name)
+    custom_model_name = model.name_or_path.split("/")[-1]
+    test_set = get_set(dataset_name, set_str='test')
 
     # Generate paths for the test users
-    fast_tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    generator = pipeline('text-generation', model=model, tokenizer=fast_tokenizer)
-    set_seed(args.seed)
-    topk = {}
-    metrics = {}
-    for uid in test_set.keys():
-        outputs = generator(f"{uid} watched ", num_beams=4, force_words_ids=entity_vocab, num_return_sequences=10)
-        # Convert tokens to entity names
-        topk[uid], hits = [], []
-        for output in outputs:
-            # TODO: Convert final entity name (we must ensure it is an item) to entity id
-            recommended_item = output[-1]
-            topk[uid].append(output[-1])
+    # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
+    if custom_model_name.startswith('ft'):
+        topks = generate_topks_withBPE(model, list(test_set.keys()), args)
+    else:
+        topks = generate_topks_withWordLevel(model, list(test_set.keys()), args)
+
+    metrics = {"ndcg": [], "mmr": []}
+    for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
+        hits = []
+        for recommended_item in topk:
             if recommended_item in test_set[uid]:
                 hits.append(1)
             else:
                 hits.append(0)
-            ndcg = ndcg_at_k(hits, len(hits))
-            mmr = mmr_at_k(hits, len(hits))
+        ndcg = ndcg_at_k(hits, len(hits))
+        mmr = mmr_at_k(hits, len(hits))
         metrics["ndcg"].append(ndcg)
         metrics["mmr"].append(mmr)
 
-    print(f"no of users: {test_set.keys()}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+    print(f"no of users: {len(test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+
+def random_baseline(args: argparse.Namespace):
+    """
+    Recommendation evaluation
+    """
+    dataset_name = args.data
+    test_set = get_set(dataset_name, set_str='test')
+
+    def get_user_negatives(dataset_name: str) -> Dict[str, List[str]]:
+        data_dir = f"data/{dataset_name}"
+        ikg_ids = set(get_pid_to_eid(data_dir).values())
+        uid_negatives = {}
+        # Generate paths for the test set
+        train_set = get_set(dataset_name, set_str='train')
+        for uid, items in tqdm(train_set.items(), desc="Calculating user negatives", colour="green"):
+            uid_negatives[uid] = list(ikg_ids - set(items))
+        return uid_negatives
+
+    user_negatives = get_user_negatives(dataset_name)
+    topk = {}
+    metrics = {"ndcg": [], "mmr": []}
+    for uid in tqdm(list(test_set.keys()), desc="Evaluating", colour="green"):
+        topk[uid] = random.sample(user_negatives[uid], 10)
+        hits = []
+        for recommended_item in topk[uid]:
+            if recommended_item in test_set[uid]:
+                hits.append(1)
+            else:
+                hits.append(0)
+        ndcg = ndcg_at_k(hits, len(hits))
+        mmr = mmr_at_k(hits, len(hits))
+        metrics["ndcg"].append(ndcg)
+        metrics["mmr"].append(mmr)
+    print("Random baseline:")
+    print(f"no of users: {len(test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
