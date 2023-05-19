@@ -123,7 +123,15 @@ if __name__ == "__main__":
     else:
         # Load the dataset
         data_dir = f"data/{dataset_name}"
-        dataset = PathDataset(dataset_name, data_dir, plain_text_path=False)
+        plain_text_path=False
+        nproc=6
+        dataset = PathDataset(dataset_name, data_dir, plain_text_path=plain_text_path)
+        if plain_text_path:
+            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.convert_numeric_path_to_textual_path(elem) for elem in x["path"] ] },
+                            batched=True, num_proc=nproc)
+        else:
+            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"] ]  }, 
+                                        batched=True, num_proc=nproc)        
         dataset.show_random_examples()
         dataset = dataset.dataset
 
@@ -137,6 +145,7 @@ if __name__ == "__main__":
             single="[EOS]:0 $A:0 [BOS]:0",
             special_tokens=[("[EOS]", tokenizer.token_to_id("[EOS]")), ("[BOS]", tokenizer.token_to_id("[BOS]"))]
         )
+        os.makedirs(f'./tokenizers/{dataset_name}', exist_ok=True)
         tokenizer.save(f"./tokenizers/{dataset_name}/WordLevel.json")
 
         #Check correctness of the encoding

@@ -16,11 +16,8 @@ class PathDataset:
         # Get eid2name and rid2name
         self.eid2name = get_eid_to_name_map(self.base_data_dir)
         self.rid2name = get_rid_to_name_map(self.base_data_dir)
+        self.plain_text_path = plain_text_path
 
-        if plain_text_path:
-            self.dataset = self.dataset.map(lambda x: {"path": self.convert_numeric_path_to_textual_path(x["path"])})
-        else:
-            self.dataset = self.dataset.map(lambda x: {"path": self.keep_numeric(x["path"])})
 
     # Based on the path struct, for now it is p to p
     def convert_numeric_path_to_textual_path(self, path: str) -> str:
@@ -71,11 +68,16 @@ class PathDataset:
         file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
 
         # set up your pool
-        with Pool(processes=8) as pool:  # orc whatever your hardware can support
-            df_list = pool.map(self.read_csv_as_dataframe, file_list)
+        #with Pool(processes=8) as pool:  # orc whatever your hardware can support
+        #    df_list = pool.map(self.read_csv_as_dataframe, file_list)#
+        #
+        #    # reduce the list of dataframes to a single dataframe
+        df_list = []
+        for filename in file_list:
+            df_list.append(self.read_csv_as_dataframe(filename))
 
-            # reduce the list of dataframes to a single dataframe
-            combined_df = pd.concat(df_list, ignore_index=True)
+        combined_df = pd.concat(df_list, ignore_index=True)
+
 
         # Convert to HuggingFace Dataset
         self.dataset = Dataset.from_pandas(combined_df)
