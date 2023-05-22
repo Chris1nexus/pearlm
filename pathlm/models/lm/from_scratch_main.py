@@ -69,7 +69,6 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         eval_steps=10000,
         learning_rate=5e-5,
         weight_decay=0.01,
-
         bf16=True,
         #use_mps_device=True,
         num_train_epochs=1,
@@ -137,12 +136,17 @@ def stratified_sampling(dataset, valid_size: float=0.05):
     })
     return dataset_dict
 
+
+def add_user_id(example):
+    example["user_id"] = example['path'].split(' ')[0]
+    return example
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
     parser.add_argument("--model", type=str, default="roberta-large", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
-    parser.add_argument("--nproc", type=int, default=4, help="Number of processes for dataset mapping")
+    parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=4, help="Train batch size")
     parser.add_argument("--test_batch_size", type=int, default=4, help="Test batch size")
     parser.add_argument("--load_data", type=bool, default=False, help="")
@@ -202,7 +206,15 @@ if __name__ == "__main__":
 
         # Load the specified tokenizer
         print("Train/Validation split...")
-        dataset_split = stratified_sampling(dataset, 0.05)
+        # Add 'user_id' to the dataset
+        dataset_split = dataset.map(add_user_id, num_proc=args.nproc)
+        # Now, we'll stratify by 'user_id'
+        dataset_split = dataset.train_test_split(test_size=0.05, stratify_by_column=dataset['user_id'])
+        # Convert DatasetDict to desired format
+        dataset_split = DatasetDict({
+            'train': dataset_split['train'].remove_columns('user_id'),
+            'test': dataset_split['test'].remove_columns('user_id'),
+        })
 
         # Tokenizer and tokenization function
         tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=context_length,
