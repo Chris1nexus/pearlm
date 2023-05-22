@@ -7,7 +7,6 @@ from typing import Dict, List
 from tqdm import tqdm
 
 
-
 # Check if dir exists and create if not
 def check_dir(dir_path: str) -> None:
     if not os.path.exists(dir_path):

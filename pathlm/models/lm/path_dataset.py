@@ -11,7 +11,7 @@ class PathDataset:
         self.dataset_name = dataset_name
         self.base_data_dir = base_data_dir
         self.data_dir = join(self.base_data_dir, "paths_random_walk")
-        self.read_multiple_csv_to_hf_dataset()
+        self.read_single_csv_to_hf_dataset()
 
         # Get eid2name and rid2name
         self.eid2name = get_eid_to_name_map(self.base_data_dir)
@@ -25,10 +25,12 @@ class PathDataset:
         ans = []
         for pos, token in enumerate(path_list):
             # Handle user and watched relation
-            if pos <= 1:
+            if pos == 0:
+                ans.append(f"U{token}")
+            elif pos == 1:
                 ans.append(token)
             # Handle recommendation
-            elif pos == len(path_list) - 1:
+            elif pos == 2 or pos == 6 or pos == 10:
                 #ans.append("<recommendation>")
                 ans.append(self.eid2name[token])
             # Handle entity
@@ -50,8 +52,7 @@ class PathDataset:
             elif pos == 1:
                 ans.append(token)
             # Handle recommendation
-            elif pos == 2 or pos == len(path_list) - 1:
-                #ans.append("<recommendation>")
+            elif pos == 2 or pos == 6 or pos == 10:
                 ans.append(f"P{token}")
             # Handle entity
             elif pos % 2 == 0:
@@ -79,6 +80,17 @@ class PathDataset:
         combined_df = pd.concat(df_list, ignore_index=True)
 
 
+        # Convert to HuggingFace Dataset
+        self.dataset = Dataset.from_pandas(combined_df)
+
+    def read_single_csv_to_hf_dataset(self):
+        file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
+
+        df_list = []
+        for filename in file_list:
+            df_list.append(self.read_csv_as_dataframe(filename))
+
+        combined_df = pd.concat(df_list, ignore_index=True)
         # Convert to HuggingFace Dataset
         self.dataset = Dataset.from_pandas(combined_df)
 

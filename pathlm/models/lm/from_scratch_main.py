@@ -2,7 +2,9 @@ import argparse
 import math
 import os
 from typing import List
-from datasets import load_from_disk
+
+import numpy as np
+from datasets import load_from_disk, DatasetDict
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
     DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast
 from pathlm.models.lm.evaluate import evaluate
@@ -23,9 +25,7 @@ from tokenizers import (
 WORD_LEVEL_TOKENIZER = "./tokenizers/ml1m/WordLevel.json"
 # Read an example and return the tokenized version
 def tokenize_function(examples: str):
-    return tokenizer(examples["path"],
-        truncation=True,
-        max_length=context_length)
+    return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
 def group_texts(examples: List[str], block_size=256):
     # Concatenate all texts.
@@ -109,11 +109,38 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     trainer.save_model(weight_path)
     return model
 
+def stratified_sampling(dataset, valid_size: float=0.05):
+    # Extract user_ids
+    uid_to_idxs = {}
+    for idx, path in enumerate(dataset['path']):
+        uid = path.split(' ')[0]
+        if uid not in uid_to_idxs:
+            uid_to_idxs[uid] = []
+        uid_to_idxs[uid].append(idx)
+
+    # Create indices for stratified split
+    train_indices, test_indices = [], []
+
+    for uid, idxs in uid_to_idxs.items():
+        np.random.shuffle(idxs)  # randomize user specific indices
+
+        split_point = int(len(idxs) * valid_size)  # calculate split point
+
+        # Append to the respective lists
+        test_indices.extend(idxs[:split_point])
+        train_indices.extend(idxs[split_point:])
+
+    # Create a DatasetDict
+    dataset_dict = DatasetDict({
+        'train': dataset.select(train_indices),
+        'test': dataset.select(test_indices),
+    })
+    return dataset_dict
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
-    parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
+    parser.add_argument("--model", type=str, default="roberta-large", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--nproc", type=int, default=4, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=4, help="Train batch size")
@@ -143,18 +170,21 @@ if __name__ == "__main__":
         # Load the dataset
         data_dir = f"data/{dataset_name}"
         plain_text_path=False
-        
+
+        print("Loading and processing path sequences...")
         dataset = PathDataset(dataset_name, data_dir, plain_text_path=plain_text_path)
         if plain_text_path:
             dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.convert_numeric_path_to_textual_path(elem) for elem in x["path"] ] },
                             batched=True, num_proc=args.nproc)
         else:
-            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"] ]  }, 
+            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"]]  },
                                         batched=True, num_proc=args.nproc)        
         dataset.show_random_examples()
         dataset = dataset.dataset
+        print(type(dataset))
 
         # Word level tokenizer
+        print("Training tokenizer...")
         tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
         special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
         tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
@@ -171,13 +201,15 @@ if __name__ == "__main__":
         #print(dataset["path"][0], tokenizer.encode(dataset["path"][0]).tokens)
 
         # Load the specified tokenizer
-        dataset_split = dataset.train_test_split(test_size=0.1)
+        print("Train/Validation split...")
+        dataset_split = stratified_sampling(dataset, 0.05)
 
         # Tokenizer and tokenization function
         tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
                                             mask_token="[MASK]", use_fast=True)
+        print("Tokenizing dataset...")
         tokenized_dataset = dataset_split.map(tokenize_function, 
             batched=True, 
             num_proc=args.nproc,
