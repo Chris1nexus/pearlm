@@ -115,8 +115,9 @@ if __name__ == "__main__":
     """
     # Handle creating a new tokenizer or training from an old one
     if args.train_from_old == False:
+        TOKENIZER_TYPE = "WordLevel"
         # Handle just WordLevel from scratch since it is the only one that needs to be trained from scratch
-        tokenizer_file = os.path.join(tokenizer_dir, f"WordLevel.json")
+        tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
         context_length = args.context_length
 
         # Word level tokenizer
@@ -155,17 +156,18 @@ if __name__ == "__main__":
         )
         # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
         check_dir(f"{data_dir}/{model_name}/from_scratch_tokenized_dataset.hf")
-        tokenized_dataset.save_to_disk(f"data/{dataset_name}/{model_name}/from_scratch_tokenized_dataset.hf")
+        tokenized_dataset.save_to_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
         print("Tokenized dataset saved to disk")
 
     # If we are using a tokenizer that has already been trained
     else:
+        TOKENIZER_TYPE = "BPE"
         #Load pretrained tokenizer from huggingface
         print("Loading pretrained tokenizer...")
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         print("Training tokenizer...")
         tokenizer = tokenizer.train_new_from_iterator(get_training_corpus(), vocab_size=tokenizer.vocab_size)
-        tokenizer.save(f"./tokenizers/{dataset_name}/ft-{model_name}-BPE.json")
+        tokenizer.save(f"./tokenizers/{dataset_name}/ft-{model_name}-{TOKENIZER_TYPE}.json")
         print("Tokenizer saved to disk")
 
         print("Tokenizing dataset...")

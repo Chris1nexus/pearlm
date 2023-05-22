@@ -112,7 +112,7 @@ def fine_tuning_train(model_name: str, args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
-    parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
+    parser.add_argument("--model", type=str, default="WordLevel", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")

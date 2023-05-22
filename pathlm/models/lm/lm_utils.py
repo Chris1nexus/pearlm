@@ -6,7 +6,7 @@ from pathlm.utils import get_eid_to_name_map, get_data_dir, get_pid_to_eid, get_
 TOKENIZER_DIR = './tokenizers'
 
 MLM_MODELS = ["bert-large", "roberta-large"]
-CLM_MODELS = ['distilgpt2', 'gpt2-xl', "stabilityai/stablelm-base-alpha-3b"]
+CLM_MODELS = ['WordLevel', 'gpt2-xl', "stabilityai/stablelm-base-alpha-3b"]
 
 WORD_LEVEL_TOKENIZER = "./tokenizers/ml1m/WordLevel.json"
 

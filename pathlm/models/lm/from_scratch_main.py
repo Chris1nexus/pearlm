@@ -144,28 +144,28 @@ def add_user_id(example):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
-    parser.add_argument("--model", type=str, default="roberta-large", help="Model to use from HuggingFace pretrained models")
+    parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
-    parser.add_argument("--batch_size", type=int, default=4, help="Train batch size")
-    parser.add_argument("--test_batch_size", type=int, default=4, help="Test batch size")
-    parser.add_argument("--load_data", type=bool, default=False, help="")
+    parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
+    parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
+    parser.add_argument("--load_data", type=bool, default=True, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     args = parser.parse_args()
 
-
+    TOKENIZER_TYPE = "WordLevel"
     model_name = args.model
     dataset_name = args.data
 
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)
-    tokenizer_file = os.path.join(tokenizer_dir, f"WordLevel.json")
+    tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
     context_length = 32
     
 
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data:
-        tokenized_dataset = load_from_disk(f"data/{dataset_name}/{model_name}/from_scratch_tokenized_dataset.hf")
+        tokenized_dataset = load_from_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
         tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
@@ -235,15 +235,15 @@ if __name__ == "__main__":
             num_proc=args.nproc,
         )
         # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
-        check_dir(f"{data_dir}/{model_name}/from_scratch_tokenized_dataset.hf")
-        tokenized_dataset.save_to_disk(f"data/{dataset_name}/{model_name}/from_scratch_tokenized_dataset.hf")
+        check_dir(f"{data_dir}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
+        tokenized_dataset.save_to_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
 
 
     # Train the model
     if args.load_model:
         # Training arguments
         custom_name = f"clm-from_scratch-{args.data}-{args.model}"
-        model = AutoModelForCausalLM.from_pretrained('clm-from_scratch-ml1m-Nicki/gpt3-base/checkpoint-10000')#f"models-weights/{dataset_name}/{model_name}/{custom_name}")#"clm-from_scratch-ml1m-distilgpt2/checkpoint-125955")
+        model = AutoModelForCausalLM.from_pretrained(f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:
         model = train_from_scratch(model_name, tokenizer, tokenized_dataset, context_length, args)
     evaluate(model, args)

@@ -46,7 +46,7 @@ def tokenize_function(examples):
     return fast_tokenizer(examples["path"])
 
 MLM_MODELS = ["bert-large", "roberta-large"]
-CLM_MODELS = ['distilgpt2', 'gpt2-xl', "stabilityai/stablelm-base-alpha-3b"]
+CLM_MODELS = ['WordLevel', 'gpt2-xl', "stabilityai/stablelm-base-alpha-3b"]
 def evaluate(model, eval_dataloader, accelerator):
     model.eval()
     losses = []
@@ -232,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
     parser.add_argument("--root-dir", type=str, default="./", help="Root directory where the dataset is stored")
 
-    parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
+    parser.add_argument("--model", type=str, default="WordLevel", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--from_scratch", type=bool, default=False, help="")
     args = parser.parse_args()
