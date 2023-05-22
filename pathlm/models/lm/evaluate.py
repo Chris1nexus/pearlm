@@ -1,5 +1,6 @@
 import argparse
 import csv
+import pickle
 import random
 from typing import List, Dict
 from tqdm import tqdm
@@ -11,7 +12,7 @@ from pathlm.models.lm.generation_constraints import ForceLastTokenLogitsProcesso
     ForceTokenAtWordPositionLogitsProcessorBPE
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
-from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set
+from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
 
 from transformers import LogitsProcessorList
 
@@ -20,24 +21,22 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     Recommendation and explanation generation
     """
     dataset_name = args.data
-    model_name = args.model
     tokenizer = PreTrainedTokenizerFast(tokenizer_file=f"./tokenizers/{args.data}/WordLevel.json", max_len=256,
                                         eos_token="[EOS]", bos_token="[BOS]",
                                         pad_token="[PAD]", unk_token="[UNK]",
                                         mask_token="[MASK]", use_fast=True)
 
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
-
+    x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
     set_seed(args.seed)
     topk = {}
-    metrics = {"ndcg": [], "mmr": []}
     for uid in tqdm(uids, desc="Generating topks", colour="green"):
         # Define the logits processor
         logits_processor = LogitsProcessorList([
-            ForceLastTokenLogitsProcessorWordLevel(user_negatives[uid], total_length=6)  # 7 = 2 input token + 5 generated tokens
+            ForceLastTokenLogitsProcessorWordLevel(user_negatives[uid], total_length=6)
+            # 7 = 2 input token + 5 generated tokens
         ])
-        uid = str(int(uid) + 1)  # user_id starts from 1 in the augmented graph starts from 0
         outputs = generator(f"U{uid} watched",
                             max_length=7,  # 7 = 2 input token + 5 generated tokens
                             num_return_sequences=10,
@@ -46,7 +45,9 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
         topk[uid] = []
         for output in outputs:
             output = output['generated_text'].split(" ")
-            recommended_item = output[-1][1:]
+            recommended_token = output[-1]
+            assert recommended_token.startswith("P")
+            recommended_item = recommended_token[1:]
             topk[uid].append(recommended_item)
 
     return topk
@@ -70,7 +71,6 @@ def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
         logits_processor = LogitsProcessorList([
             ForceTokenAtWordPositionLogitsProcessorBPE(tokenizer, user_negatives[uid], word_position=6)  # 7 = 2 input token + 5 generated tokens
         ])
-        uid = str(int(uid) + 1)  # user_id starts from 1 in the augmented graph starts from 0
         outputs = generator(f"U{uid} <word_end> watched",
                             max_length=70,  # word != token so we need to increase the max_length
                             num_return_sequences=20,
@@ -101,8 +101,12 @@ def evaluate(model, args: argparse.Namespace):
 
     # Generate paths for the test users
     # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
-    if custom_model_name.startswith('ft'):
+    if False:
+        topks = pickle.load(open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "rb"))
+    elif custom_model_name.startswith('ft'):
         topks = generate_topks_withBPE(model, list(test_set.keys()), args)
+        check_dir(f"./results/{dataset_name}/{custom_model_name}")
+        pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
     else:
         topks = generate_topks_withWordLevel(model, list(test_set.keys()), args)
 

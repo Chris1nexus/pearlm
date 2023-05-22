@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from transformers import LogitsProcessor
 
 
@@ -11,14 +12,23 @@ class ForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
         super().__init__(**kwargs)
         self.force_tokens = force_tokens
         self.total_length = total_length
+        self.used_tokens = []
+
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
         if cur_len == self.total_length:
+            #Compute min score in scores tensor
             mask = np.isin(range(scores.shape[-1]), self.force_tokens)
-            scores[:, ~mask] = -float('Inf')
+            used_mask = np.isin(range(scores.shape[-1]), self.used_tokens)
+            mask = mask & ~used_mask  # Remove already used tokens from the mask
+            # Set to the smallest representable number
+            scores[:, ~mask] = float('-Inf')
         return scores
 
+    def process_finished_sequence(self, input_ids):
+        # Remember the last token of the finished sequence
+        self.used_tokens.append(input_ids[-1].item())
 """
 Force the last token to be one of the force_tokens if the total length is reached, in the path generation stage this means
 to limit the hop size. This is a BPE-level constraint, works with piece tokenizers.

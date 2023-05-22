@@ -60,21 +60,23 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     # Training arguments
     custom_name = f"from_scratch-{args.data}-{args.model}"
 
-    BATCH_SIZE = 64
+    
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         f"clm-{custom_name}",
-            evaluation_strategy="epoch",
-            save_strategy='epoch',
-        eval_steps=100000,
-        learning_rate=2e-5,
+            evaluation_strategy="steps",
+            save_strategy='steps',
+        eval_steps=10000,
+        learning_rate=5e-5,
         weight_decay=0.01,
+
+        bf16=True,
         #use_mps_device=True,
         num_train_epochs=1,
-        per_device_train_batch_size=BATCH_SIZE,
-        per_device_eval_batch_size=BATCH_SIZE,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=1000,  # number of warmup steps for learning rate
-        save_steps=1000,
+        save_steps=10000,
         save_total_limit=2,
         load_best_model_at_end=True,
         seed=args.seed,
@@ -97,10 +99,9 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
 
     # Train model
     trainer.train()
-
     # Evaluate model
-    eval_results = trainer.evaluate()
-    print(f"Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
+    #eval_results = trainer.evaluate()
+    #print(f"Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
 
     # Save model
     weight_path = f"./models-weights/{args.data}/{args.model}/{custom_name}"
@@ -115,6 +116,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--nproc", type=int, default=4, help="Number of processes for dataset mapping")
+    parser.add_argument("--batch_size", type=int, default=4, help="Train batch size")
+    parser.add_argument("--test_batch_size", type=int, default=4, help="Test batch size")
     parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     args = parser.parse_args()
@@ -126,13 +129,13 @@ if __name__ == "__main__":
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)
     tokenizer_file = os.path.join(tokenizer_dir, f"WordLevel.json")
-    context_length = 256
+    context_length = 32
     
 
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data:
         tokenized_dataset = load_from_disk(f"data/{dataset_name}/{model_name}/from_scratch_tokenized_dataset.hf")
-        tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=256,
+        tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
                                             mask_token="[MASK]", use_fast=True)        
@@ -192,12 +195,11 @@ if __name__ == "__main__":
         tokenized_dataset.save_to_disk(f"data/{dataset_name}/{model_name}/from_scratch_tokenized_dataset.hf")
 
 
-
     # Train the model
     if args.load_model:
         # Training arguments
-        custom_name = f"from_scratch-{args.data}-{args.model}"
-        model = AutoModelForCausalLM.from_pretrained(f"models-weights/{dataset_name}/{model_name}/{custom_name}")
+        custom_name = f"clm-from_scratch-{args.data}-{args.model}"
+        model = AutoModelForCausalLM.from_pretrained('clm-from_scratch-ml1m-Nicki/gpt3-base/checkpoint-10000')#f"models-weights/{dataset_name}/{model_name}/{custom_name}")#"clm-from_scratch-ml1m-distilgpt2/checkpoint-125955")
     else:
         model = train_from_scratch(model_name, tokenizer, tokenized_dataset, context_length, args)
     evaluate(model, args)
