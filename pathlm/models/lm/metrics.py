@@ -27,3 +27,32 @@ def mmr_at_k(hit_list: List[int], k: int) -> float:
     if len(hit_idxs[0]) > 0:
         return 1 / (hit_idxs[0][0] + 1)
     return 0.
+
+"""
+Beyond Accuracy
+"""
+
+"""
+    Catalog coverage https://dl.acm.org/doi/pdf/10.1145/2926720
+"""
+def coverage(recommended_items_by_group, n_items_in_catalog):
+    group_metric_value = {}
+    for group, item_set in recommended_items_by_group.items():
+        group_metric_value[group] = len(item_set) / n_items_in_catalog
+    return group_metric_value
+
+
+def serendipity_at_k(user_topk, most_pop_topk, k):
+    user_topk, most_pop_topk = set(user_topk), set(most_pop_topk)
+    intersection = user_topk.intersection(most_pop_topk)
+    return (k-len(intersection)) / k
+
+
+def diversity_at_k(topk_items, pid2genre):
+    diversity_items_tok = set([pid2genre[pid] for pid in topk_items]) # set of genres
+    return len(diversity_items_tok)/len(topk_items)
+
+
+def novelty_at_k(topk_items, pid2popularity):
+    novelty_items_topk = [1 - pid2popularity[pid] for pid in topk_items]
+    return np.mean(novelty_items_topk)
