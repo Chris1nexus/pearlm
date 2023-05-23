@@ -74,7 +74,7 @@ def get_set(dataset_name: str, set_str: str='test') -> Dict[str, List[int]]:
         reader = csv.reader(f, delimiter="\t")
         for row in reader:
             user_id, item_id, rating, timestamp = row
-            user_id = str(int(user_id) - 1)  # user_id starts from 1 in the augmented graph starts from 0
+            user_id = user_id  # user_id starts from 1 in the augmented graph starts from 0
             item_id = i2kg[item_id]  # Converting dataset id to eid
             curr_set[user_id].append(item_id)
     f.close()

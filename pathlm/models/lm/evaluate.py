@@ -1,5 +1,6 @@
 import argparse
 import csv
+import os
 import pickle
 import random
 from typing import List, Dict
@@ -21,16 +22,24 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     Recommendation and explanation generation
     """
     dataset_name = args.data
-    tokenizer = PreTrainedTokenizerFast(tokenizer_file=f"./tokenizers/{args.data}/WordLevel.json", max_len=256,
+    data_dir = f"data/{dataset_name}"
+    tokenizer_dir = f'./tokenizers/{dataset_name}'
+    TOKENIZER_TYPE = "WordLevel"
+
+    tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
+    tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
                                         eos_token="[EOS]", bos_token="[BOS]",
                                         pad_token="[PAD]", unk_token="[UNK]",
                                         mask_token="[MASK]", use_fast=True)
 
+    # Load user negatives
+    last_item_idx = list(get_pid_to_eid(data_dir).values())
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
-    x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
+    #x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
     set_seed(args.seed)
     topk = {}
+    non_product_count = 0
     for uid in tqdm(uids, desc="Generating topks", colour="green"):
         # Define the logits processor
         logits_processor = LogitsProcessorList([
@@ -46,10 +55,17 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
         for output in outputs:
             output = output['generated_text'].split(" ")
             recommended_token = output[-1]
-            assert recommended_token.startswith("P")
+            #assert recommended_token.startswith("P")
             recommended_item = recommended_token[1:]
+            if not recommended_token.startswith("P"):
+                if recommended_item < last_item_idx:
+                    print(f"Item {recommended_item} is an entity in the dataset")
+                else:
+                    print(f"Recommended token {recommended_token} is not a product")
+                    non_product_count += 1
+                    continue
             topk[uid].append(recommended_item)
-
+    print(f"Non product count: {non_product_count}")
     return topk
 
 def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
@@ -109,7 +125,8 @@ def evaluate(model, args: argparse.Namespace):
         pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
     else:
         topks = generate_topks_withWordLevel(model, list(test_set.keys()), args)
-
+        #check_dir(f"./results/{dataset_name}/{custom_model_name}")
+        #pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
     metrics = {"ndcg": [], "mmr": []}
     for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
         hits = []

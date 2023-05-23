@@ -30,7 +30,8 @@ def get_user_negatives_tokens_ids(dataset_name: str, tokenizer) -> Dict[str, Lis
     # Generate paths for the test set
     train_set = get_set(dataset_name, set_str='train')
     valid_set = get_set(dataset_name, set_str='valid')
-    for uid, items in tqdm(train_set.items(), desc="Calculating user negatives", colour="green"):
-        items = [tokenizer(f"P{item}").input_ids[1] for item in items]
-        uid_negatives[uid] = set(ikg_token_ids - set(items) - set(valid_set[uid]))
+    for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
+        train_items = [tokenizer(f"P{item}").input_ids[1] for item in train_set[uid]]
+        val_items = [tokenizer(f"P{item}").input_ids[1] for item in valid_set[uid]]
+        uid_negatives[uid] = list(set(ikg_token_ids - set(train_items) - set(val_items) - set([0])))
     return uid_negatives

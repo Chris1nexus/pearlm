@@ -22,9 +22,8 @@ from tokenizers import (
 )
 
 
-WORD_LEVEL_TOKENIZER = "./tokenizers/ml1m/WordLevel.json"
 # Read an example and return the tokenized version
-def tokenize_function(examples: str):
+def tokenize_function(examples: str, context_length: int=32):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
 def group_texts(examples: List[str], block_size=256):
@@ -149,8 +148,10 @@ if __name__ == "__main__":
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
     parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
+    parser.add_argument("--context_length", type=int, default=32,
+                        help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--load_data", type=bool, default=True, help="")
-    parser.add_argument("--load_model", type=bool, default=False, help="")
+    parser.add_argument("--load_model", type=bool, default=True, help="")
     args = parser.parse_args()
 
     TOKENIZER_TYPE = "WordLevel"
@@ -160,13 +161,11 @@ if __name__ == "__main__":
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)
     tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
-    context_length = 32
-    
 
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data:
         tokenized_dataset = load_from_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
-        tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=context_length,
+        tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=args.context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
                                             mask_token="[MASK]", use_fast=True)        
@@ -217,7 +216,7 @@ if __name__ == "__main__":
         })
 
         # Tokenizer and tokenization function
-        tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=context_length,
+        tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
                                             mask_token="[MASK]", use_fast=True)
@@ -245,7 +244,7 @@ if __name__ == "__main__":
         custom_name = f"clm-from_scratch-{args.data}-{args.model}"
         model = AutoModelForCausalLM.from_pretrained(f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:
-        model = train_from_scratch(model_name, tokenizer, tokenized_dataset, context_length, args)
+        model = train_from_scratch(model_name, tokenizer, tokenized_dataset, args.context_length, args)
     evaluate(model, args)
 
 
