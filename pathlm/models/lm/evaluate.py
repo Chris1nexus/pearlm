@@ -33,7 +33,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
                                         mask_token="[MASK]", use_fast=True)
 
     # Load user negatives
-    last_item_idx = list(get_pid_to_eid(data_dir).values())
+    last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
     #x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
@@ -58,7 +58,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
             #assert recommended_token.startswith("P")
             recommended_item = recommended_token[1:]
             if not recommended_token.startswith("P"):
-                if recommended_item < last_item_idx:
+                if int(recommended_item) < last_item_idx:
                     print(f"Item {recommended_item} is an entity in the dataset")
                 else:
                     print(f"Recommended token {recommended_token} is not a product")
