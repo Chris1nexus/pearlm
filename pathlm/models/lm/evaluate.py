@@ -58,7 +58,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
             #assert recommended_token.startswith("P")
             recommended_item = recommended_token[1:]
             if not recommended_token.startswith("P"):
-                if int(recommended_item) < last_item_idx:
+                if recommended_token.startswith("E") and int(recommended_item) < last_item_idx:
                     print(f"Item {recommended_item} is an entity in the dataset")
                 else:
                     print(f"Recommended token {recommended_token} is not a product")
@@ -125,8 +125,8 @@ def evaluate(model, args: argparse.Namespace):
         pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
     else:
         topks = generate_topks_withWordLevel(model, list(test_set.keys()), args)
-        #check_dir(f"./results/{dataset_name}/{custom_model_name}")
-        #pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
+        check_dir(f"./results/{dataset_name}/{custom_model_name}")
+        pickle.dump(topks, open(f"./results/{dataset_name}/{custom_model_name}/topks.pkl", "wb"))
     metrics = {"ndcg": [], "mmr": []}
     for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
         hits = []
