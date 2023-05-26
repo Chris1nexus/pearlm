@@ -7,8 +7,9 @@ from pathlm.sampling.container.kg_analyzer import KGstats
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default=LFM1M, help='One of {ml1m, lfm1m}')
-    parser.add_argument('--max_n_paths', type=int, default=100000, help='Max number of paths sampled for each user.')
+    parser.add_argument('--max_n_paths', type=int, default=100, help='Max number of paths sampled for each user.')
     parser.add_argument('--max_hop', type=int, default=3, help='Max number of hops.')
+    parser.add_argument("--itemset_type", type=str, default='inner', help="Choose whether final entity of a path is a product\nin the train interaction set of a user, outer set, or any reachable item {inner,outer,all} respectively")
 
     args = parser.parse_args()
     ML1M = 'ml1m'
@@ -28,13 +29,15 @@ if __name__ == '__main__':
     MAX_HOP = args.max_hop
     #PROB = 0.01
     N_PATHS = args.max_n_paths
-    LOGDIR = 'paths_random_walk' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}'
+    itemset_type= args.itemset_type
+    print('Closed destination item set: ',CLOSED)
+    LOGDIR = 'paths_random_walk' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{CLOSED}'
     #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
-    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS)
+    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type)
     dataset_name = 'lfm1m'
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     lfm1m_kg = KGstats(dataset_name, dirpath)	
-    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS)
+    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type)
 
     #ml1m_kg.compute_metapath_frequencies()
     #lfm1m_kg.compute_metapath_frequencies()    

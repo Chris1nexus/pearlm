@@ -3,17 +3,19 @@ from collections import defaultdict
 import numpy as np
 from tqdm import tqdm
 import pandas as pd
-from models.PGPR.pgpr_utils import *
 import json
 import os
+import pickle
 import itertools
 import functools
 import pandas as pd
 from collections import deque
 import random
-from models.model_statistics.container.kg import KnowledgeGraph
-from models.model_statistics.container.path_trie import PathTrie
-from models.model_statistics.container.file_io import PathFileIO
+
+from pathlm.models.PGPR.pgpr_utils import *
+from pathlm.sampling.container.kg import KnowledgeGraph
+from pathlm.sampling.container.path_trie import PathTrie
+from pathlm.sampling.container.file_io import PathFileIO
 
 def bfs(pid, aug_kg, ptrie, n_hop, product_entity_name, user_entity_name, u2p_rel_name):
 
@@ -153,6 +155,111 @@ def random_walk_sample_paths(uid, kg, items, n_hop, KG2T, R2T, PROD_ENT, U2P_REL
                 cnt += 1
     
 
+def random_walk_sample_paths_recursive(uid, kg, items, n_hop, KG2T, R2T, PROD_ENT, U2P_REL, logdir, 
+        pathIO, user_dict, uid_ext_ent_mapping, uid_outer_ext_ent_mapping, ignore_rels=set(), max_paths=None, itemset_type='inner'):
+    dirpath = logdir#os.path.join(logdir, 'paths3')
+    os.makedirs(dirpath, exist_ok=True)
+
+    
+    def dfs(prev_ent_id, cur_ent_id, cur_hop, path):
+        if cur_hop >= n_hop:
+            path = [ str(x) for x in path]
+            #path = [x if isinstance(x,int) else x.item()  for x in path]
+            #pathIO.write_to_file(path, n_hop-1, fp)
+            fp.write(' '.join(path) + '\n' )  
+            
+            return True
+
+
+
+        if cur_ent_id not in kg:
+            return False
+        valid_rels = list(kg[cur_ent_id].keys())
+        random.shuffle(valid_rels)
+        for rel in valid_rels:
+            if rel in ignore_rels:
+                continue
+            
+            candidates = kg[cur_ent_id][rel] 
+            if cur_hop == n_hop-1:
+                key = uid,rel,cur_ent_id
+                
+                if itemset_type == 'inner' and key in uid_ext_ent_mapping:
+                    candidates = uid_ext_ent_mapping[key]
+                elif itemset_type == 'outer' and key in uid_outer_ext_ent_mapping:
+                    candidates = uid_outer_ext_ent_mapping[key]
+                # else the default itemset is used (all  items reachable from current entity, which is not an item at the 'n_hop-1' hop)
+            if len(candidates) == 0:
+                continue                    
+
+            path.append( rel)
+            random.shuffle(candidates)
+            
+
+            for next_ent_id in candidates:
+                if next_ent_id == prev_ent_id:
+                    continue
+                path.append(next_ent_id)
+                if dfs(cur_ent_id, next_ent_id, cur_hop+1, path):
+                    path.pop()
+                    path.pop()
+                    return True
+                path.pop()
+            path.pop()
+        return False
+    user_products = list(user_dict[uid])
+    with open(os.path.join(dirpath, f'paths_{uid}.txt' ), 'w') as fp:
+            cnt = 0
+            
+            while cnt < max_paths:
+                cur_hop = 1
+                pid = random.choice(user_products)
+                if pid not in kg:
+                    continue                
+                cur_ent_id = pid
+                path = [uid, U2P_REL, cur_ent_id]
+                dfs(-1, cur_ent_id, cur_hop, path)
+                cnt += 1
+    '''
+    iterative sampling
+    with open(os.path.join(dirpath, f'paths_{uid}.txt' ), 'w') as fp:
+        
+            cnt = 0
+            
+            while cnt < max_paths:
+                cur_hop = 1
+                pid = random.choice(user_products)
+                cur_ent_id = pid
+                path = [uid, U2P_REL, cur_ent_id]
+                #path.append( cur_ent_id)
+                while cur_hop < n_hop:
+                    if cur_ent_id not in kg:
+                        break                    
+                    valid_rels = list(kg[cur_ent_id].keys())
+                    while True:
+                        rel = random.choice(valid_rels )
+
+                        if rel not in ignore_rels:
+                            break
+                    if cur_hop == n_hop-1:
+                        tail_id = random.choice(unseen_products)
+                    else:
+                        tail_id = random.choice(kg[cur_ent_id][rel] )
+                    path.append( rel)
+                    path.append( tail_id)
+                    cur_ent_id = tail_id
+                    
+                    cur_hop += 1
+                
+                if cur_hop >= n_hop:
+                    path = [ str(x) for x in path]
+                    #path = [x if isinstance(x,int) else x.item()  for x in path]
+                    #pathIO.write_to_file(path, n_hop-1, fp)
+                    fp.write(' '.join(path) + '\n' )  
+                cnt += 1
+    '''
+    
+
 
 
 
@@ -204,19 +311,25 @@ class KGstats:
         uid_inter_test = os.path.join(path,  f'test.txt')
         uid_inter_valid = os.path.join(path,  f'valid.txt')
         uid_inter_train = os.path.join(path,  f'train.txt')
-        item_list_file = os.path.join(path, f'item_list.txt')
+        item_list_file = os.path.join(path, 'i2kg_map.txt')#f'item_list.txt')
         kg_filepath = os.path.join(path,  f'kg_final.txt')                                      
-        rel_mapping_filepath = os.path.join(os.path.dirname(path),  f'r_map.txt')
+        pid_mapping_filepath = os.path.join(path,  f'i2kg_map.txt')
+        rel_mapping_filepath = os.path.join(path,  f'r_map.txt')
         rel_df = pd.read_csv(rel_mapping_filepath, sep='\t')
-
+        pid_df = pd.read_csv(pid_mapping_filepath, sep='\t')
+        print(pid_df)
+        self.pid2eid = { pid : eid for pid,eid in zip(pid_df.pid.values.tolist(), pid_df.eid.values.tolist())  }
         self.rel_id2type = { int(i) : rel_name for i,rel_name in zip(rel_df.id.values.tolist(), rel_df.name.values.tolist())  }
-        
+        #print(self.rel_id2type)
+
+        self.rel_type2id = { v:k for k,v in self.rel_id2type.items() }
+        #print(self.rel_type2id)
         
         self.items = KGstats.load_items(item_list_file)
         
-        self.train_user_dict = KGstats.load_user_inter(uid_inter_train)
-        self.valid_user_dict = KGstats.load_user_inter(uid_inter_valid)
-        self.test_user_dict = KGstats.load_user_inter(uid_inter_test)    
+        self.train_user_dict = self.load_user_inter(uid_inter_train)
+        self.valid_user_dict = self.load_user_inter(uid_inter_valid)
+        self.test_user_dict = self.load_user_inter(uid_inter_test)    
         user_dict = defaultdict(set)
         for uid in self.train_user_dict:
             user_dict[uid].update(self.train_user_dict[uid])
@@ -234,17 +347,19 @@ class KGstats:
         self.n_entities = max(max(self.kg_np[:, 0]), max(self.kg_np[:, 2])) + 1
         self.n_triples = len(self.kg_np)        
         
-    def load_user_inter(filepath):
+    def load_user_inter(self, filepath):
         G = defaultdict(set)
         with open(filepath) as f:
             for line  in f:
                 line = line.strip()
-                data = [int(v) for v in line.split(' ')]
+                data = [int(v) for v in line.split('\t')]
+                
+                #print(data)
                 uid = data[0]
-                pids = data[1:]
-                if len(pids) == 0:
-                    continue
-                G[uid].update(pids)
+                pid = int(data[1])
+                rating = int(data[2])
+                timestamp = int(data[3])
+                G[uid].add(self.pid2eid[pid])
         return G        
     
     def load_items(item_file):
@@ -253,9 +368,10 @@ class KGstats:
             for line_id, line in enumerate(f):
                 if line_id == 0:
                     continue
-                data = line.strip().rstrip().split(' ')
-                orig_id = int(data[0])
-                item_id = int(data[1])
+                data = line.strip().rstrip().split('\t')
+                #print(data)
+                orig_id = int(data[1])
+                item_id = int(data[0])
                 item_ids.add(item_id)
         return item_ids
     
@@ -269,7 +385,8 @@ class KGstats:
     
     def load_kg(kg_filepath, undirected=True):
         kg = defaultdict()
-        kg_np = np.loadtxt(kg_filepath, np.uint32)
+        #kg_np = np.loadtxt(kg_filepath, np.uint32)
+        kg_np = pd.read_csv(kg_filepath, sep='\t').to_numpy()
         print(kg_np.shape)
         kg_np = np.unique(kg_np, axis=0)
         print(kg_np.shape)
@@ -332,37 +449,110 @@ class KGstats:
                         q.append( ((t_id, t_type),dist+1) )
         return pid_rel_stats, pid_ent_stats
 
-    def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk'):
+    def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk',itemset_type='inner'):
         user_dict, items = self.user_dict, self.items
         PROD_ENT, U2P_REL =  MAIN_PRODUCT_INTERACTION[self.dataset_name] 
         # undirected knowledge graph hypotesis (for each relation, there exists its inverse)
-        nproc = 6
+        
 
         kg_copy = dict()
         for ent in self.kg:
             kg_copy[ent] = dict()
             for rel in self.kg[ent]:
                 kg_copy[ent][rel] = list(self.kg[ent][rel] )
-        
 
+
+
+
+
+
+        d = dict()
+        uid_ext_ent_filename = f'{self.dataset_name}_uid_ext_ent_mapping.pkl'
+
+        if itemset_type =='inner':
+            if not os.path.exists(uid_ext_ent_filename):
+                for uid in self.train_user_dict:
+                    for pid in self.train_user_dict[uid]:
+                        if pid not in self.kg:
+                            continue
+                        for rel in self.kg[pid]:
+                            for ent_id in self.kg[pid][rel]:
+                                key = uid,rel,ent_id
+                                if key not in d:
+                                    d[key] = []
+                                d[uid,rel,ent_id].append(pid)
+                with open(uid_ext_ent_filename,'wb') as f:
+                    pickle.dump(d, f)
+            else:
+                with open(uid_ext_ent_filename, 'rb') as f:
+                    d = pickle.load(f)
+
+        d_outer=dict()
+        uid_outer_ext_ent_filename = f'{self.dataset_name}_outer_ext_ent_mapping.pkl'
+        #'''
+        if itemset_type =='outer':
+            
+            if not os.path.exists(uid_outer_ext_ent_filename):        
+                for uid in self.train_user_dict:
+                    for pid in items:
+                        if pid in self.train_user_dict[uid]:
+                            continue
+                        if pid not in self.kg:
+                            continue
+                        for rel in self.kg[pid]:
+                            for ent_id in self.kg[pid][rel]:
+                                key = uid,rel,ent_id
+                                if key not in d_outer:
+                                    d_outer[key] = []
+                                d_outer[uid,rel,ent_id].append(pid)   
+                with open(uid_outer_ext_ent_filename, 'wb') as f:
+                    pickle.dump(d_outer, f)
+            else:
+                with open(uid_outer_ext_ent_filename, 'rb') as f:
+                    d_outer = pickle.load(f)
+        #'''
+        print('Created cache data structures')
         import math
         N_HOP_BITS = 6
         ENT_ID_BITS = int(math.log2(self.n_entities)) + 1
         REL_ID_BITS = int(math.log2(self.n_relations)) + 1
         pathIO = PathFileIO(N_HOP_BITS, ENT_ID_BITS, REL_ID_BITS) 
-        with mp.Pool(nproc) as pool:
-            pool.starmap( functools.partial(random_walk_sample_paths, kg=kg_copy, 
+
+        nproc = 4
+        '''
+        for uid in self.user_dict:
+            print('uid: ', uid)
+            random_walk_sample_paths_recursive(uid, 
+                kg=kg_copy, 
                 items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, PROD_ENT=PROD_ENT, U2P_REL=U2P_REL,
                                 pathIO = pathIO,
                                 logdir=os.path.join(self.logdir, logdir),
-                                user_dict=self.user_dict,
+                                user_dict=self.train_user_dict,
+                                uid_ext_ent_mapping=d,
+                                uid_outer_ext_ent_mapping=d_outer,
                                 ignore_rels=ignore_rels,
                                 max_paths=max_paths,
+                                closed_loop_itemset=closed_loop_itemset,
+                                )
+        '''
+        print('BBBBBBBBBBBB: ', closed_loop_itemset)
+        with mp.Pool(nproc) as pool:
+            pool.starmap( functools.partial(random_walk_sample_paths_recursive, 
+                kg=kg_copy, 
+                items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, PROD_ENT=PROD_ENT, U2P_REL=U2P_REL,
+                                pathIO = pathIO,
+                                logdir=os.path.join(self.logdir, logdir),
+                                user_dict=self.train_user_dict,
+                                uid_ext_ent_mapping=d,
+                                uid_outer_ext_ent_mapping=d_outer,
+                                ignore_rels=ignore_rels,
+                                max_paths=max_paths,
+                                itemset_type=itemset_type,
                                 ),
                                 tqdm([[uid] for uid in self.user_dict ])
                                 #tqdm([[pid] for pid in self.items ])  
                                 )
-
+        #'''
 
     def path_sampler(self, ignore_rels=set(), max_hop=None, p=0.001, max_paths=4000, logdir='paths'):
         kg, user_dict, items = self.kg, self.user_dict, self.items
@@ -542,7 +732,9 @@ class KGstats:
                     if t in self.aug_kg[PROD_ENT]:
                         # swap them , to have product as head, just to reduce amount of code below
                         h1,t1 = t,h
-                    
+                    #print(rel, h1, t1, '::::',h,t)
+                    if h1 not in self.aug_kg[PROD_ENT]:
+                        self.aug_kg[PROD_ENT][h1] = dict()
                     if R2T[rel] not in self.aug_kg[PROD_ENT][h1]:
                         self.aug_kg[PROD_ENT][h1][R2T[rel]] = list()
                     
