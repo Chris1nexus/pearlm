@@ -23,7 +23,7 @@ from tokenizers import (
 
 
 # Read an example and return the tokenized version
-def tokenize_function(examples: str, context_length: int=32):
+def tokenize_function(examples: str, context_length: int=100):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
 def group_texts(examples: List[str], block_size=256):
@@ -68,7 +68,10 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         eval_steps=10000,
         learning_rate=5e-5,
         weight_decay=0.01,
-        bf16=True,
+        bf16=False,
+        fp16=False,
+        no_cuda=True,
+        logging_first_step=True,
         #use_mps_device=True,
         num_train_epochs=1,
         per_device_train_batch_size=args.batch_size,
@@ -148,10 +151,12 @@ if __name__ == "__main__":
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
     parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
-    parser.add_argument("--context_length", type=int, default=32,
+    parser.add_argument("--context_length", type=int, default=100,
                         help="Context length value when training a tokenizer from scratch")
-    parser.add_argument("--load_data", type=bool, default=True, help="")
-    parser.add_argument("--load_model", type=bool, default=True, help="")
+    parser.add_argument("--load_data", type=bool, default=False, help="")
+    parser.add_argument("--load_model", type=bool, default=False, help="")
+    parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
+    parser.add_argument("--infer_batch_size", type=int, default=128, help="Inference batch size")
     args = parser.parse_args()
 
     TOKENIZER_TYPE = "WordLevel"
@@ -172,33 +177,68 @@ if __name__ == "__main__":
     else:
         # Load the dataset
         data_dir = f"data/{dataset_name}"
-        plain_text_path=False
+        plain_text_path=True
 
         print("Loading and processing path sequences...")
         dataset = PathDataset(dataset_name, data_dir, plain_text_path=plain_text_path)
+        def convert_and_add_uid(paths_dict, convert_fn):
+            batch_dict = {"path":[], "user_id":[]}
+
+            paths_list = batch_dict['path']
+            user_list = batch_dict['user_id'] 
+
+            for elem in paths_dict["path"]:
+                paths_list.append(convert_fn(elem))
+                user_list.append(elem.split(' ')[0])
+            return batch_dict        
+        def convert_typed_path_and_add_uid(paths_dict, convert_fn):
+            batch_dict = {"path":[], "user_id":[]}
+
+            paths_list = batch_dict['path']
+            user_list = batch_dict['user_id'] 
+
+            for elem in paths_dict["path"]:
+                paths_list.append(convert_fn(elem))
+                user_list.append(elem.split(' ')[1][1:]  )
+            return batch_dict                    
         if plain_text_path:
-            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.convert_numeric_path_to_textual_path(elem) for elem in x["path"] ] },
-                            batched=True, num_proc=args.nproc)
+            convert_fn = dataset.identity_op#dataset.convert_numeric_path_to_textual_path
+            #dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.convert_numeric_path_to_textual_path(elem) for elem in x["path"] ] },
+            #                batched=True, num_proc=args.nproc)
         else:
-            dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"]]  },
-                                        batched=True, num_proc=args.nproc)        
+            convert_fn = dataset.keep_numeric_typed#keep_numeric
+            #dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"]]  },
+            #                            batched=True, num_proc=args.nproc)     
+        
+        dataset.dataset = dataset.dataset.map(lambda x: convert_typed_path_and_add_uid(x,convert_fn),#convert_and_add_uid(x, convert_fn),
+                                        batched=True, num_proc=args.nproc)    
+        dataset.dataset = dataset.dataset.class_encode_column('user_id')                                            
         dataset.show_random_examples()
         dataset = dataset.dataset
         print(type(dataset))
-
-        # Word level tokenizer
-        print("Training tokenizer...")
-        tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
-        special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
-        tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
-        trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
-        tokenizer.train_from_iterator(dataset["path"], trainer=trainer)
-        tokenizer.post_processor = processors.TemplateProcessing(
-            single="[EOS]:0 $A:0 [BOS]:0",
-            special_tokens=[("[EOS]", tokenizer.token_to_id("[EOS]")), ("[BOS]", tokenizer.token_to_id("[BOS]"))]
-        )
-        
-        tokenizer.save(tokenizer_file)
+        if not os.path.exists(tokenizer_file):
+            # Word level tokenizer
+            print("Training tokenizer...")
+            tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
+            special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
+            tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+            trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
+            tokenizer.train_from_iterator(dataset["path"], trainer=trainer)
+            tokenizer.post_processor = processors.TemplateProcessing(
+                single="[EOS]:0 $A:0 [BOS]:0",
+                special_tokens=[("[EOS]", tokenizer.token_to_id("[EOS]")), ("[BOS]", tokenizer.token_to_id("[BOS]"))]
+            )
+            
+            tokenizer.save(tokenizer_file)
+            tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
+                                            eos_token="[EOS]", bos_token="[BOS]",
+                                            pad_token="[PAD]", unk_token="[UNK]",
+                                            mask_token="[MASK]", use_fast=True)            
+        else:
+            tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=args.context_length,
+                                                eos_token="[EOS]", bos_token="[BOS]",
+                                                pad_token="[PAD]", unk_token="[UNK]",
+                                                mask_token="[MASK]", use_fast=True)                
 
         #Check correctness of the encoding
         #print(dataset["path"][0], tokenizer.encode(dataset["path"][0]).tokens)
@@ -206,9 +246,9 @@ if __name__ == "__main__":
         # Load the specified tokenizer
         print("Train/Validation split...")
         # Add 'user_id' to the dataset
-        dataset_split = dataset.map(add_user_id, num_proc=args.nproc)
+        #dataset_split = dataset.map(add_user_id, num_proc=args.nproc)
         # Now, we'll stratify by 'user_id'
-        dataset_split = dataset.train_test_split(test_size=0.05, stratify_by_column=dataset['user_id'])
+        dataset_split = dataset.train_test_split(test_size=0.05, stratify_by_column='user_id')
         # Convert DatasetDict to desired format
         dataset_split = DatasetDict({
             'train': dataset_split['train'].remove_columns('user_id'),
@@ -216,23 +256,43 @@ if __name__ == "__main__":
         })
 
         # Tokenizer and tokenization function
-        tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
-                                            eos_token="[EOS]", bos_token="[BOS]",
-                                            pad_token="[PAD]", unk_token="[UNK]",
-                                            mask_token="[MASK]", use_fast=True)
+        #tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=args.context_length,
+        #                            eos_token="[EOS]", bos_token="[BOS]",
+        #                            pad_token="[PAD]", unk_token="[UNK]",
+        #                            mask_token="[MASK]", use_fast=True)   
+        #tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
+        #                                    eos_token="[EOS]", bos_token="[BOS]",
+        #                                    pad_token="[PAD]", unk_token="[UNK]",
+        #                                    mask_token="[MASK]", use_fast=True)
         print("Tokenizing dataset...")
-        tokenized_dataset = dataset_split.map(tokenize_function, 
-            batched=True, 
-            num_proc=args.nproc,
-            remove_columns=["path"]
-        )
+        pre1 = f"data/{dataset_name}/{TOKENIZER_TYPE}/pre1_from_scratch_tokenized_dataset.hf"
+
+        
+        if not os.path.exists(pre1):
+            tokenized_dataset = dataset_split.map(tokenize_function, 
+                batched=True, 
+                num_proc=args.nproc,
+                remove_columns=["path"]
+            )
+            check_dir(pre1)
+            tokenized_dataset.save_to_disk(pre1)
+        else:
+            tokenized_dataset = load_from_disk(pre1)
+        
         # Group texts into chunks of block_size tokens
-        tokenized_dataset = tokenized_dataset.map(
-            group_texts,
-            batched=True,
-            batch_size=1000,
-            num_proc=args.nproc,
-        )
+        pre2 = f"data/{dataset_name}/{TOKENIZER_TYPE}/pre2_from_scratch_tokenized_dataset.hf"        
+        
+        if not os.path.exists(pre2):        
+            tokenized_dataset = tokenized_dataset.map(
+                group_texts,
+                batched=True,
+                batch_size=1000,
+                num_proc=args.nproc,
+            )
+            check_dir(pre2)
+            tokenized_dataset.save_to_disk(pre2)
+        else:
+            tokenized_dataset = load_from_disk(pre2)
         # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
         check_dir(f"{data_dir}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
         tokenized_dataset.save_to_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
@@ -241,8 +301,9 @@ if __name__ == "__main__":
     # Train the model
     if args.load_model:
         # Training arguments
-        custom_name = f"clm-from_scratch-{args.data}-{args.model}"
-        model = AutoModelForCausalLM.from_pretrained(f'models-weights/{dataset_name}/{model_name}/{custom_name}')
+        custom_name = 'clm-from_scratch-ml1m-distilgpt2/checkpoint-20000'#f"clm-from_scratch-{args.data}-{args.model}"
+        #custom_name = 'distilgpt2-checkpoint-10000'
+        model = AutoModelForCausalLM.from_pretrained(custom_name)#f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:
         model = train_from_scratch(model_name, tokenizer, tokenized_dataset, args.context_length, args)
     evaluate(model, args)
