@@ -95,6 +95,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     """
     Recommendation and explanation generation
     """
+    set_seed(SEED)
     dataset_name = args.data
     data_dir = f"data/{dataset_name}"
     tokenizer_dir = f'./tokenizers/{dataset_name}'
@@ -115,8 +116,9 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
     #x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
+    
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer, device=args.eval_device)
-    set_seed(SEED)
+    
     topk = defaultdict(list)
     non_product_count = 0
 
@@ -224,6 +226,7 @@ def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
     """
     Recommendation and explanation generation
     """
+    set_seed(SEED)
     dataset_name = args.data
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
     eid2name = get_eid_to_name_map(f"data/{dataset_name}")
@@ -232,7 +235,7 @@ def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
 
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
-    set_seed(SEED)
+    
     topks = {}
     for uid in tqdm(uids, desc="Generating topks", colour="green"):
         # Define the logits processor
