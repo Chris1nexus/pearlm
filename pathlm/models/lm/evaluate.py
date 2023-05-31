@@ -18,7 +18,7 @@ from pathlm.models.lm.generation_constraints import ForceLastTokenLogitsProcesso
     TypedForceLastTokenLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
-from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
+from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir,SEED
 
 from transformers import LogitsProcessorList
 '''
@@ -116,7 +116,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
     #x = [tokenizer.decode(negative) for negative in user_negatives[uids[0]]]
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer, device=args.eval_device)
-    set_seed(args.seed)
+    set_seed(SEED)
     topk = defaultdict(list)
     non_product_count = 0
 
@@ -232,7 +232,7 @@ def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
     user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
 
     generator = pipeline('text-generation', model=model, tokenizer=tokenizer)
-    set_seed(args.seed)
+    set_seed(SEED)
     topks = {}
     for uid in tqdm(uids, desc="Generating topks", colour="green"):
         # Define the logits processor

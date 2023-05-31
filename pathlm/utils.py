@@ -6,6 +6,14 @@ from typing import Dict, List
 
 from tqdm import tqdm
 
+SEED = 2023
+
+import torch 
+import random
+import numpy as np
+
+
+
 
 # Check if dir exists and create if not
 def check_dir(dir_path: str) -> None:
@@ -31,6 +39,12 @@ def get_eid_to_name_map(data_dir: str) -> dict:
             eid2name[eid] = ename
     f.close()
     return eid2name
+
+def set_seed(seed=SEED):
+    torch.manual_seed(seed)
+    torch.use_deterministic_algorithms(True)  
+    np.random.seed(seed) 
+    random.seed(seed)
 
 # Get pid2eid dictionary to allow conversions from pid to eid
 def get_pid_to_eid(data_dir: str) -> dict:

@@ -1,8 +1,9 @@
 import os
 import argparse
 import random
-random.seed(2023)
 
+from transformers import set_seed
+from pathlm.utils import SEED
 from pathlm.models.PGPR.pgpr_utils import * 
 from pathlm.sampling.container.kg_analyzer import KGstats
 
@@ -15,6 +16,9 @@ if __name__ == '__main__':
     parser.add_argument("--itemset_type", type=str, default='inner', help="Choose whether final entity of a path is a product\nin the train interaction set of a user, outer set, or any reachable item {inner,outer,all} respectively")
 
     args = parser.parse_args()
+
+    set_seed(SEED)
+
     ML1M = 'ml1m'
     LFM1M ='lfm1m'
     CELL='cellphones'

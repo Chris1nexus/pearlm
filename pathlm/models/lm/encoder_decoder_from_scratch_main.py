@@ -6,11 +6,12 @@ from typing import List
 import numpy as np
 from datasets import load_from_disk, DatasetDict
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
-    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, EncoderDecoderModel, EncoderDecoderConfig
+    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, EncoderDecoderModel, EncoderDecoderConfig,
+    set_seed
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS, TOKENIZER_DIR
 from pathlm.models.lm.path_dataset import PathDataset
-from pathlm.utils import check_dir
+from pathlm.utils import check_dir, SEED
 from tokenizers import (
     decoders,
     models,
@@ -82,7 +83,7 @@ def train_encoder_decoder_one_stage(tokenizer, tokenized_dataset, args: argparse
         save_steps=10000,
         save_total_limit=2,
         load_best_model_at_end=True,
-        seed=args.seed,
+        seed=SEED,
     )
 
     tokenizer.pad_token = tokenizer.eos_token
@@ -111,7 +112,6 @@ if __name__ == "__main__":
     parser.add_argument("--encoder", type=str, default="roberta-base", help="")
     parser.add_argument("--decoder", type=str, default="distilgpt2", help="")
     parser.add_argument("--one_stage", type=bool, default=True, help="")
-    parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--context_length", type=int, default=32,
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--nproc", type=int, default=4, help="Number of processes for dataset mapping")
@@ -120,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--load_model", type=bool, default=False, help="")
     args = parser.parse_args()
 
+    set_seed(SEED)
     TOKENIZER_TYPE = "WordLevel"
     model_name = "encoder-decoder"
     dataset_name = args.data

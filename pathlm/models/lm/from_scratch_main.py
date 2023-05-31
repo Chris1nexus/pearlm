@@ -3,14 +3,18 @@ import math
 import os
 from typing import List
 
+
 import numpy as np
 from datasets import load_from_disk, DatasetDict
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
-    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast
+    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, set_seed
+
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS
 from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.utils import check_dir
+from pathlm.utils import SEED
+
 from tokenizers import (
     decoders,
     models,
@@ -80,7 +84,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         save_steps=10000,
         save_total_limit=2,
         load_best_model_at_end=True,
-        seed=args.seed,
+        seed=SEED,
     )
 
 
@@ -147,7 +151,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
     parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
-    parser.add_argument("--seed", type=int, default=123, help="Seed for reproducibility")
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
     parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
@@ -158,6 +161,9 @@ if __name__ == "__main__":
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--infer_batch_size", type=int, default=128, help="Inference batch size")
     args = parser.parse_args()
+
+
+    set_seed(SEED)
 
     TOKENIZER_TYPE = "WordLevel"
     model_name = args.model
