@@ -1,5 +1,8 @@
 import os
 import argparse
+import random
+random.seed(2023)
+
 from pathlm.models.PGPR.pgpr_utils import * 
 from pathlm.sampling.container.kg_analyzer import KGstats
 
@@ -30,14 +33,14 @@ if __name__ == '__main__':
     #PROB = 0.01
     N_PATHS = args.max_n_paths
     itemset_type= args.itemset_type
-    print('Closed destination item set: ',CLOSED)
-    LOGDIR = 'paths_random_walk' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{CLOSED}'
+    print('Closed destination item set: ',itemset_type)
+    LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}'
     #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
-    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type)
+    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, collaborative=False)
     dataset_name = 'lfm1m'
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     lfm1m_kg = KGstats(dataset_name, dirpath)	
-    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type)
+    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, collaborative=False)
 
     #ml1m_kg.compute_metapath_frequencies()
     #lfm1m_kg.compute_metapath_frequencies()    
