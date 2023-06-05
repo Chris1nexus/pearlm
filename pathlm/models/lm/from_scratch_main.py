@@ -2,18 +2,32 @@ import argparse
 import math
 import os
 from typing import List
-
+import pickle
+import random
+from collections import defaultdict
+from typing import List, Dict
+from tqdm import tqdm
+import multiprocessing as mp
+import itertools
+import functools
+from transformers.utils import is_torch_tpu_available
+import torch
 
 import numpy as np
-from datasets import load_from_disk, DatasetDict
+from datasets import load_from_disk, DatasetDict, Dataset
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
-    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, set_seed
+    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, PhrasalConstraint, LogitsProcessorList, set_seed, pipeline \
 
+from pathlm.models.lm.generation_constraints import TypifiedForceLastTokenLogitsProcessorWordLevel
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS
 from pathlm.models.lm.path_dataset import PathDataset
-from pathlm.utils import check_dir
-from pathlm.utils import SEED
+from pathlm.utils import SEED, get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
+from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
+from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k 
+
+
+
 
 from tokenizers import (
     decoders,
@@ -24,6 +38,182 @@ from tokenizers import (
     trainers,
     Tokenizer,
 )
+
+
+
+
+
+
+class CustomTrainer(Trainer):
+
+    def __init__(
+        self,
+        dataset_name=None,
+        n_hop=3,
+        infer_batch_size=1,
+        n_sequences_per_user=10,
+        tokenizer=None,
+        eval_device='cpu',
+        **kwargs
+    ):   
+        super().__init__(**kwargs)
+
+
+        data_dir = f"data/{dataset_name}"
+        model = kwargs['model']
+        self.tokenizer = tokenizer
+        self.dataset_name = dataset_name
+        self.custom_model_name = model.name_or_path.split("/")[-1]
+        self.test_set = get_set(dataset_name, set_str='test')
+        uids = list(self.test_set.keys())
+        self.n_hop = n_hop
+        self.eval_device = eval_device
+
+        self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2 # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+        self.LAST_TOKEN_POS = self.SEQUENCE_LEN-1
+        self.INFERENCE_BATCH_SIZE = args.infer_batch_size
+        self.N_SEQUENCES_PER_USER = n_sequences_per_user
+        print('Sequence length: ',self.SEQUENCE_LEN)
+        print('Last token position: ',self.LAST_TOKEN_POS)
+
+
+
+        # Load user negatives
+        self.last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
+        self.user_negatives = get_user_negatives_tokens_ids(dataset_name, tokenizer)
+
+        #self.generator = pipeline('text-generation', model=model, tokenizer=tokenizer, device=eval_device)
+        
+        topk = defaultdict(list)
+        non_product_count = 0
+
+        self.id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
+
+        #'''
+
+        init_condition_fn = lambda uid: f"Us U{uid} Rf R-1"
+        self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
+        
+
+        
+        self.logits_processor = LogitsProcessorList([
+            TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=self.user_negatives, 
+                        tokenizer=tokenizer, 
+                        total_length=self.SEQUENCE_LEN,#LAST_TOKEN_POS,
+                        num_return_sequences=self.N_SEQUENCES_PER_USER,
+                        id_to_uid_token_map=self.id_to_uid_token_map)#6)
+            #ForceLastTokenLogitsProcessorWordLevel(user_negatives, tokenizer=tokenizer, total_length=LAST_TOKEN_POS)
+            # 7 = 2 input token + 5 generated tokens
+        ])
+
+        self.test_dataset = Dataset.from_dict(self.inference_paths)
+
+    def __lazy_load_data(dataset):
+            for row in dataset:
+                    yield row["uid"]
+
+    def __generate_topks_withWordLevel(self, model):
+        self.generator = pipeline('text-generation', model=model, tokenizer=self.tokenizer, device=self.eval_device)
+
+        outputs = self.generator(CustomTrainer.__lazy_load_data(self.test_dataset),#f"Us U{uid} Rf R-1",
+                                max_length=self.SEQUENCE_LEN,#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+                                num_return_sequences=self.N_SEQUENCES_PER_USER,
+                                logits_processor=self.logits_processor,
+                                batch_size=self.INFERENCE_BATCH_SIZE,
+        )  
+        topk = defaultdict(list)
+        non_product_count = 0
+        with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)  ) as pbar:
+            for output_batch in outputs:
+                    for output in output_batch:
+                        output = output['generated_text'].split(" ")
+                        uid = output[1][1:]
+
+                        recommended_token = output[-1]
+                        recommended_item = recommended_token[1:]
+                        if len(recommended_token) < 2  or not recommended_token.startswith("P"):
+
+                            non_product_count += 1
+                            continue
+                        #print(output)
+                        topk[uid].append(recommended_item)
+                    pbar.update(1)
+        print(f"Non product count: {non_product_count}")        
+        return topk
+
+    def evaluate(self, model):
+        # Generate paths for the test users
+        # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
+
+        topks = self.__generate_topks_withWordLevel(model)
+        check_dir(f"./results/{self.dataset_name}/{self.custom_model_name}")
+        pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.custom_model_name}/topks.pkl", "wb"))
+        metrics = {"ndcg": [], "mmr": []}
+        for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
+            hits = []
+            for recommended_item in topk:
+                if recommended_item in self.test_set[uid]:
+                    hits.append(1)
+                else:
+                    hits.append(0)
+            ndcg = ndcg_at_k(hits, len(hits))
+            mmr = mmr_at_k(hits, len(hits))
+            metrics["ndcg"].append(ndcg)
+            metrics["mmr"].append(mmr)
+
+        print(f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+        for k in metrics:
+            metrics[f'eval_{k}'] = np.mean(metrics[k])
+        return metrics
+
+    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+        if self.control.should_log:
+            if is_torch_tpu_available():
+                xm.mark_step()
+
+            logs: Dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs)
+
+        metrics = None
+        if self.control.should_evaluate and self.control.should_save:
+            '''
+            if isinstance(self.eval_dataset, dict):
+                metrics = {}
+                for eval_dataset_name, eval_dataset in self.eval_dataset.items():
+                    dataset_metrics = self.evaluate(
+                        eval_dataset=eval_dataset,
+                        ignore_keys=ignore_keys_for_eval,
+                        metric_key_prefix=f"eval_{eval_dataset_name}",
+                    )
+                    metrics.update(dataset_metrics)
+            else:
+                metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
+            '''
+            metrics = self.evaluate(model.module)
+            self._report_to_hp_search(trial, self.state.global_step, metrics)
+
+            # Run delayed LR scheduler now that metrics are populated
+            if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+                self.lr_scheduler.step(metrics[self.args.metric_for_best_model])
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial, metrics=metrics)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+
 
 
 # Read an example and return the tokenized version
@@ -69,7 +259,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         f"clm-{custom_name}",
             evaluation_strategy="steps",
             save_strategy='steps',
-        eval_steps=10000,
+        eval_steps=1000,
         learning_rate=5e-5,
         weight_decay=0.01,
         bf16=False,
@@ -81,9 +271,11 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=1000,  # number of warmup steps for learning rate
-        save_steps=10000,
+        save_steps=500,
         save_total_limit=2,
-        load_best_model_at_end=True,
+        #load_best_model_at_end=True,
+        metric_for_best_model='ndcg',
+        greater_is_better=True,
         seed=SEED,
     )
 
@@ -94,13 +286,26 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         tokenizer.pad_token = tokenizer.eos_token
         data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    trainer = Trainer(
-        model=model,
+    #trainer = Trainer(
+    #    model=model,
+    #    args=training_args,
+    #    train_dataset=tokenized_dataset["train"],
+    #    eval_dataset=tokenized_dataset["test"],
+    #    data_collator=data_collator,
+    #)
+    trainer = CustomTrainer(
+        dataset_name=args.data,
+        n_hop=args.n_hop,
+        infer_batch_size=args.infer_batch_size,
+        n_sequences_per_user=args.n_seq_infer,
+        tokenizer=tokenizer,
+        eval_device=args.eval_device,
+                model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["test"],
-        data_collator=data_collator,
-    )
+        data_collator=data_collator)
+
 
     # Train model
     trainer.train()
@@ -156,10 +361,14 @@ if __name__ == "__main__":
     parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
     parser.add_argument("--context_length", type=int, default=100,
                         help="Context length value when training a tokenizer from scratch")
+    parser.add_argument("--n_hop", type=int, default=3,
+                        help="Number of elements in a predicted sequence (considering only the ids)")    
     parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
+    parser.add_argument("--eval_ckpt_iter", type=int, default='10000', help="")
     parser.add_argument("--infer_batch_size", type=int, default=128, help="Inference batch size")
+    parser.add_argument("--n_seq_infer", type=int, default=10, help="Number of sequences generated for each user at inference time")
     args = parser.parse_args()
 
 
@@ -307,7 +516,7 @@ if __name__ == "__main__":
     # Train the model
     if args.load_model:
         # Training arguments
-        custom_name = 'clm-from_scratch-ml1m-distilgpt2/checkpoint-20000'#f"clm-from_scratch-{args.data}-{args.model}"
+        custom_name = f'clm-from_scratch-{args.data}-{args.model}/checkpoint-{args.eval_ckpt_iter}'#f"clm-from_scratch-{args.data}-{args.model}"
         #custom_name = 'distilgpt2-checkpoint-10000'
         model = AutoModelForCausalLM.from_pretrained(custom_name)#f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:

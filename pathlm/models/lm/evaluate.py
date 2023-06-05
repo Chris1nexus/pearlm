@@ -15,7 +15,7 @@ from transformers import AutoTokenizer, set_seed, pipeline, PreTrainedTokenizerF
 from datasets import Dataset
 from pathlm.models.lm.generation_constraints import ForceLastTokenLogitsProcessorWordLevel, \
     ForceTokenAtWordPositionLogitsProcessorBPE, \
-    TypedForceLastTokenLogitsProcessorWordLevel
+    TypifiedForceLastTokenLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir,SEED
@@ -101,7 +101,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     TOKENIZER_TYPE = "WordLevel"
 
-    SEQUENCE_LEN = 22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+    SEQUENCE_LEN = 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
     LAST_TOKEN_POS = SEQUENCE_LEN-1
     INFERENCE_BATCH_SIZE = args.infer_batch_size
     N_SEQUENCES_PER_USER = 10
@@ -132,9 +132,9 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
 
     
     logits_processor = LogitsProcessorList([
-        TypedForceLastTokenLogitsProcessorWordLevel(force_token_map=user_negatives, 
+        TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=user_negatives, 
                     tokenizer=tokenizer, 
-                    total_length=LAST_TOKEN_POS,
+                    total_length=SEQUENCE_LEN,#LAST_TOKEN_POS,
                     num_return_sequences=N_SEQUENCES_PER_USER,
                     id_to_uid_token_map=id_to_uid_token_map)#6)
         #ForceLastTokenLogitsProcessorWordLevel(user_negatives, tokenizer=tokenizer, total_length=LAST_TOKEN_POS)
@@ -166,10 +166,13 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
                     #assert recommended_token.startswith("P")
                     recommended_item = recommended_token[1:]
                     if not recommended_token.startswith("P"):
-                        if recommended_token.startswith("E") and int(recommended_item) < last_item_idx:
-                            print(f"Item {recommended_item} is an entity in the dataset")
+                        if recommended_token.startswith("E"): 
+                            #int(recommended_item) < last_item_idx:
+                            pass
+                            #print(f"Item {recommended_item} is an entity in the dataset")
                         else:
-                            print(f"Recommended token {recommended_token} is not a product")
+                            #print(f"Recommended token {recommended_token} is not a product")
+                            pass
                             non_product_count += 1
                             continue
                     #print(output)

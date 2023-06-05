@@ -33,7 +33,7 @@ class ForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
         self.used_tokens.append(input_ids[-1].item())
 
 
-class TypedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
+class TypifiedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, force_token_map, total_length, tokenizer, num_return_sequences, id_to_uid_token_map, **kwargs):
         super().__init__(**kwargs)
         self.force_token_map = force_token_map
@@ -49,7 +49,9 @@ class TypedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
         #print(input_ids.shape)
         
         cur_len = input_ids.shape[-1]
+        #print(input_ids.shape, self.__decode(input_ids[0]))
         if cur_len == self.total_length:
+            #print(input_ids[0])
             #print(scores.shape)
             force_tokens = None
             uid = None
