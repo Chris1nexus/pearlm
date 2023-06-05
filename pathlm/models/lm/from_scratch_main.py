@@ -148,7 +148,7 @@ class CustomTrainer(Trainer):
         topks = self.__generate_topks_withWordLevel(model)
         check_dir(f"./results/{self.dataset_name}/{self.custom_model_name}")
         pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.custom_model_name}/topks.pkl", "wb"))
-        metrics = {"ndcg": [], "mmr": []}
+        metrics = {"ndcg": [], "mmr": [],  }
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
             for recommended_item in topk:
@@ -162,9 +162,10 @@ class CustomTrainer(Trainer):
             metrics["mmr"].append(mmr)
 
         print(f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+        metrics_ = dict()
         for k in metrics:
-            metrics[f'eval_{k}'] = np.mean(metrics[k])
-        return metrics
+            metrics_[f'eval_{k}'] = np.mean(metrics[k])
+        return metrics_
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
         if self.control.should_log:
