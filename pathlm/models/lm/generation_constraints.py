@@ -21,6 +21,7 @@ class ForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
         cur_len = input_ids.shape[-1]
         if cur_len == self.total_length:
             #Compute min score in scores tensor
+
             mask = np.isin(range(scores.shape[-1]), self.force_tokens)
             used_mask = np.isin(range(scores.shape[-1]), self.used_tokens)
             mask = mask & ~used_mask  # Remove already used tokens from the mask
@@ -50,13 +51,17 @@ class TypifiedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
         
         cur_len = input_ids.shape[-1]
         #print(input_ids.shape, self.__decode(input_ids[0]))
-        if cur_len == self.total_length:
+        #print(input_ids.shape, scores.shape)
+        if cur_len == self.total_length-1:
+
             #print(input_ids[0])
             #print(scores.shape)
             force_tokens = None
             uid = None
             user_tokens = None
             UID_POS = 1 
+            #print()
+            min_score = scores.min()
             for idx in range(scores.shape[0]):
                 #if idx % self.num_return_sequences == 0:
                 #    #user_tokens = self.__decode([input_ids[idx,UID_POS]])
@@ -68,9 +73,10 @@ class TypifiedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
                 #Compute min score in scores tensor
                 mask = np.isin(range(scores.shape[-1]), force_tokens)
                 used_mask = np.isin(range(scores.shape[-1]), self.used_tokens)
+                #print(used_mask.sum(), used_mask.shape)
                 mask = mask & ~used_mask  # Remove already used tokens from the mask
                 # Set to the smallest representable number
-                scores[idx, ~mask] = float('-Inf')
+                scores[idx, ~mask] = min_score#float('-Inf')
         return scores
 
     def __decode(self, token_ids):

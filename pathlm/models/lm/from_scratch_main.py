@@ -69,7 +69,7 @@ class CustomTrainer(Trainer):
         self.n_hop = n_hop
         self.eval_device = eval_device
 
-        self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2 # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+        self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2 + 1 # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
         self.LAST_TOKEN_POS = self.SEQUENCE_LEN-1
         self.INFERENCE_BATCH_SIZE = args.infer_batch_size
         self.N_SEQUENCES_PER_USER = n_sequences_per_user

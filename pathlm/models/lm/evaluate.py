@@ -124,6 +124,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
 
     id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
 
+
     #'''
 
     init_condition_fn = lambda uid: f"Us U{uid} Rf R-1"
@@ -163,16 +164,9 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
                     uid = output[1][1:]
 
                     recommended_token = output[-1]
-                    #assert recommended_token.startswith("P")
                     recommended_item = recommended_token[1:]
-                    if not recommended_token.startswith("P"):
-                        if recommended_token.startswith("E"): 
-                            #int(recommended_item) < last_item_idx:
-                            pass
-                            #print(f"Item {recommended_item} is an entity in the dataset")
-                        else:
-                            #print(f"Recommended token {recommended_token} is not a product")
-                            pass
+                    if len(recommended_token) < 2  or not recommended_token.startswith("P"):
+
                             non_product_count += 1
                             continue
                     #print(output)
