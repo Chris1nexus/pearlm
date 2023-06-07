@@ -14,7 +14,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_n_paths', type=int, default=100, help='Max number of paths sampled for each user.')
     parser.add_argument('--max_hop', type=int, default=3, help='Max number of hops.')
     parser.add_argument("--itemset_type", type=str, default='inner', help="Choose whether final entity of a path is a product\nin the train interaction set of a user, outer set, or any reachable item {inner,outer,all} respectively")
-
+    parser.add_argument("--collaborative", type=bool, default=False, help="Wether paths should be sampled considering users as intermediate entities")
+    parser.add_argument('--nproc', type=int, default=4, help='Number of processes to sample in parallel')
     args = parser.parse_args()
 
     set_seed(SEED)
@@ -37,14 +38,22 @@ if __name__ == '__main__':
     #PROB = 0.01
     N_PATHS = args.max_n_paths
     itemset_type= args.itemset_type
+    COLLABORATIVE=args.collaborative
+    NPROC = args.nproc
+
     print('Closed destination item set: ',itemset_type)
-    LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}'
+    print('Collaborative filtering: ',args.collaborative)
+    LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}__collaborative_{COLLABORATIVE}'
     #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
-    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, collaborative=False)
+    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
+        collaborative=COLLABORATIVE,
+        nproc=NPROC)
     dataset_name = 'lfm1m'
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     lfm1m_kg = KGstats(dataset_name, dirpath)	
-    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, collaborative=False)
+    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
+        collaborative=COLLABORATIVE,
+        nproc=NPROC)
 
     #ml1m_kg.compute_metapath_frequencies()
     #lfm1m_kg.compute_metapath_frequencies()    

@@ -12,7 +12,7 @@ class LiteralPath:
 
 
     recom_prod = 'Ps'
-    fw_rel = 'Rf'
-    back_rel = 'Rb'
+    fw_rel = 'R' #'Rf'
+    back_rel = 'R' #'Rb'
     interaction_rel_id = -1
 
