@@ -127,7 +127,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
 
     #'''
 
-    init_condition_fn = lambda uid: f"Us U{uid} Rf R-1"
+    init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
     inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
     
 

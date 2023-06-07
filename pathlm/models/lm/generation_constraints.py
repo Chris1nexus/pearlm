@@ -19,7 +19,7 @@ class ForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
-        if cur_len == self.total_length:
+        if cur_len == self.total_length-1:
             #Compute min score in scores tensor
 
             mask = np.isin(range(scores.shape[-1]), self.force_tokens)

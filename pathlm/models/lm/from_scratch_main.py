@@ -91,7 +91,7 @@ class CustomTrainer(Trainer):
 
         #'''
 
-        init_condition_fn = lambda uid: f"Us U{uid} Rf R-1"
+        init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
         
 
