@@ -25,8 +25,8 @@ from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.utils import SEED, get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k 
-
-
+from pathlm.tools.mapper import EmbeddingMapper
+from pathlm.sampling.container.kg_analyzer import KGstats
 
 
 from tokenizers import (
@@ -134,7 +134,7 @@ class CustomTrainer(Trainer):
                         if len(recommended_token) < 2  or not recommended_token.startswith("P"):
 
                             non_product_count += 1
-                            continue
+                            pass
                         #print(output)
                         topk[uid].append(recommended_item)
                     pbar.update(1)
@@ -237,22 +237,49 @@ def group_texts(examples: List[str], block_size=256):
     return result
 
 def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace):
+    
+    embed_filepath = os.path.join(args.embedding_root_dir, args.dataset, args.emb_filename)
+    try:
+        embeds = pickle.load(open(embed_filepath, 'rb'))
+    except:
+        embeds = None
+    
+
+    config_kwargs ={        
+        'vocab_size':len(tokenizer),
+        'n_ctx':context_length,
+        #n_positions=context_length,
+        'pad_token_id':tokenizer.pad_token_id,
+        'bos_token_id':tokenizer.bos_token_id,
+        'eos_token_id':tokenizer.eos_token_id,}
+    if embeds:
+        config_kwargs.update({
+        'hidden_size':args.emb_size,
+        'num_attention_heads':args.emb_size//10
+        })
 
     # Initializing the selected model style configuration
     config = AutoConfig.from_pretrained(
         model_name,
-        vocab_size=len(tokenizer),
-        n_ctx=context_length,
-        pad_token_id=tokenizer.pad_token_id,
-        bos_token_id=tokenizer.bos_token_id,
-        eos_token_id=tokenizer.eos_token_id,
+        **config_kwargs
     )
 
     # Initializing a model from the configuration
     model = AutoModelForCausalLM.from_config(config)
+    if embeds:
 
+        
+        ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
+        # Dataset directories.
+        dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
+        
+        data_dir_mapping= os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
+        kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)  
+
+        mapper = EmbeddingMapper(tokenizer, kg, embeds)      
+        mapper.init_with_embedding(model.transformer.wte.weight)
     # Training arguments
-    custom_name = f"from_scratch-{args.data}-{args.model}"
+    custom_name = f"from_scratch-{args.dataset}-{args.model}"
 
     
     # Training arguments for Causal Language Model task
@@ -265,7 +292,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         weight_decay=0.01,
         bf16=False,
         fp16=False,
-        no_cuda=True,
+        #no_cuda=True,
         logging_first_step=True,
         #use_mps_device=True,
         num_train_epochs=1,
@@ -295,7 +322,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     #    data_collator=data_collator,
     #)
     trainer = CustomTrainer(
-        dataset_name=args.data,
+        dataset_name=args.dataset,
         n_hop=args.n_hop,
         infer_batch_size=args.infer_batch_size,
         n_sequences_per_user=args.n_seq_infer,
@@ -315,8 +342,8 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     #print(f"Perplexity: {math.exp(eval_results['eval_loss']):.2f}")
 
     # Save model
-    weight_path = f"./models-weights/{args.data}/{args.model}/{custom_name}"
-    check_dir(f"./models-weights/{args.data}/{args.model}/{custom_name}")
+    weight_path = f"./models-weights/{args.dataset}/{args.model}/{custom_name}"
+    check_dir(f"./models-weights/{args.dataset}/{args.model}/{custom_name}")
     trainer.save_model(weight_path)
     return model
 
@@ -355,7 +382,7 @@ def add_user_id(example):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data", type=str, default="ml1m", help="{ml1m, lfm1m}")
+    parser.add_argument("--dataset", type=str, default="ml1m", help="{ml1m, lfm1m}")
     parser.add_argument("--model", type=str, default="distilgpt2", help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
@@ -370,6 +397,11 @@ if __name__ == "__main__":
     parser.add_argument("--eval_ckpt_iter", type=int, default='10000', help="")
     parser.add_argument("--infer_batch_size", type=int, default=128, help="Inference batch size")
     parser.add_argument("--n_seq_infer", type=int, default=10, help="Number of sequences generated for each user at inference time")
+
+    parser.add_argument("--embedding_root_dir", type=str, default="./embedding-weights", help="default: ./embedding-weights")
+    parser.add_argument("--emb_filename", type=str, default=None, help="default: 'transe_embed.pkl'")
+    parser.add_argument("--emb_size", type=int, default=100, help="Transformer Embedding size (must match external embedding size, if chosen)")
+    
     args = parser.parse_args()
 
 
@@ -377,7 +409,7 @@ if __name__ == "__main__":
 
     TOKENIZER_TYPE = "WordLevel"
     model_name = args.model
-    dataset_name = args.data
+    dataset_name = args.dataset
 
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)
@@ -517,7 +549,7 @@ if __name__ == "__main__":
     # Train the model
     if args.load_model:
         # Training arguments
-        custom_name = f'clm-from_scratch-{args.data}-{args.model}/checkpoint-{args.eval_ckpt_iter}'#f"clm-from_scratch-{args.data}-{args.model}"
+        custom_name = f'clm-from_scratch-{args.dataset}-{args.model}/checkpoint-{args.eval_ckpt_iter}'#f"clm-from_scratch-{args.dataset}-{args.model}"
         #custom_name = 'distilgpt2-checkpoint-10000'
         model = AutoModelForCausalLM.from_pretrained(custom_name)#f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:

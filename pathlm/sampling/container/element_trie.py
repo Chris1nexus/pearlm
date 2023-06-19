@@ -1,3 +1,4 @@
+
 class Trie:
     TERMINATION = ''
     class Item:
@@ -35,37 +36,25 @@ class Trie:
             cur_item = cur_trie[ch]
             cur_item.counter += 1
             cur_trie = cur_item.trie
-        cur_trie[Trie.TERMINATION] = None 
+        cur_trie[Trie.TERMINATION] = None   
 
-class LiteralPath:
-	
-    main_user = ''#'Us'
-    oth_user = ''#'U'
-    ent = ''#'E'
-    prod = ''#'P'
+if __name__ == '__main__':
+    s = """CINEMATOGRAPHER = 'cinematographer'
+    PRODCOMPANY = 'prodcompany'
+    COMPOSER = 'composer'
+    CATEGORY = 'category'
+    ACTOR = 'actor'
+    COUNTRY = 'country'
+    WIKIPAGE = 'wikipage'
+    EDITOR = 'editor'
+    WRITTER = 'writter'
+    DIRECTOR = 'director'"""
+    entities = []
+    for line in s.split('\n'):
+        print(line.rstrip().replace(' ', '').split('=')[1].replace('\'', ''))
+        ent_name = line.rstrip().replace(' ', '').split('=')[1].replace('\'', '')
+        entities.append(ent_name)
 
-    user_type = 'U'
-    prod_type = 'P'
-    ent_type = 'E'
-    rel_type = 'R'
+    trie = Trie(entities)
 
-
-    recom_prod = ''#'P'#'Ps'
-    fw_rel = ''#'R' #'Rf'
-    back_rel = ''#'R' #'Rb'
-    interaction_rel_id = '-1'
-
-    def get_ids(strings):
-        TERMINATION = ''
-        trie = dict()
-
-        for string in strings:
-            cur_trie = trie
-            for ch in string:
-                if ch not in cur_trie:
-                    cur_trie[ch] = dict()
-                cur_trie = cur_trie[ch]
-            cur_trie[TERMINATION] = ''
-
-
-
+    trie.compute_unique_prefixes()

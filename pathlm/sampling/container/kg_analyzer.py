@@ -17,8 +17,8 @@ from pathlm.sampling.container.kg import KnowledgeGraph
 from pathlm.sampling.container.path_trie import PathTrie
 from pathlm.sampling.container.file_io import PathFileIO
 from pathlm.sampling.container.constants import LiteralPath
-
-
+from pathlm.sampling.scoring.scorer  import TransEScorer
+from pathlm.models.PGPR.data_utils import Dataset
 
 
 def bfs(pid, aug_kg, ptrie, n_hop, product_entity_name, user_entity_name, u2p_rel_name):
@@ -245,21 +245,234 @@ def random_walk_typed_content_based(uid, kg, items, n_hop, KG2T, R2T, PROD_ENT, 
                 cnt += 1
 '''
 
+def random_walk_typified_beamsearch(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_ENT, U2P_REL, logdir, 
+        user_dict, ignore_rels=set(), max_paths=None, itemset_type='inner', REL_TYPE2ID=None, collaborative=True,
+        num_beams=10, scorer=None, dataset_info=None):
+    dirpath = logdir
+    os.makedirs(dirpath, exist_ok=True)
 
-def random_walk_typed(uid, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_ENT, U2P_REL, logdir, 
-         user_dict, ignore_rels=set(), max_paths=None, itemset_type='inner', REL_TYPE2ID=None, collaborative=True):
+
+    
+    REL_TYPE2ID[U2P_REL] = LiteralPath.interaction_rel_id
+    u2p_rel_id = LiteralPath.interaction_rel_id
+    user_prod_cache = dict()
+    unique_path_set = set()
+    def find_candidates(uid, candidate_paths):
+        
+        for cur_hop in range(1, n_hop):
+            next_candidates = []
+            
+            for idx, (path, path_elems, score) in enumerate(candidate_paths):
+
+                    def search_candidate(path_elems, next_candidates, cur_hop, prev_score):
+                            prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, prev_rel = path_elems
+                            #if cur_ent_id not in kg[cur_ent_t]:
+                            #    continue
+                            valid_rels = list(kg[cur_ent_t][cur_ent_id].keys())
+                            random.shuffle(valid_rels)
+
+                            for rel in valid_rels:
+                                if rel in ignore_rels:
+                                    continue
+                                rel_id = REL_TYPE2ID[rel]
+                                
+                                candidate_types = kg[cur_ent_t][cur_ent_id][rel]
+
+
+
+                                random.shuffle(candidate_types)
+                                for cand_type in candidate_types:
+                                    if not collaborative and cand_type == USER_ENT:
+                                        continue 
+                                    candidates = kg[cur_ent_t][cur_ent_id][rel][cand_type]
+
+                                    if cur_hop == n_hop-1:
+
+                                        
+                                        if itemset_type == 'inner':
+                                            if (rel, cand_type) not in user_prod_cache:
+                                                candidates = list(user_dict[uid].intersection(set(candidates)))
+                                                user_prod_cache[rel,cand_type] = candidates
+                                            else:
+                                                candidates = user_prod_cache[rel,cand_type]
+                                        elif itemset_type == 'outer':
+                                            if (rel, cand_type) not in user_prod_cache:
+                                                candidates = list(set(candidates) - user_dict[uid]   )
+                                                user_prod_cache[rel,cand_type] = candidates
+                                            else:
+                                                candidates = user_prod_cache[rel,cand_type]                                            
+                                        elif itemset_type == 'all':
+                                            # candidate set is left unchanged
+                                            #print('ZZZZZZZZZ')
+                                            pass
+                                        else:
+                                            #print('YYYYYYYYYYYYY')
+                                            continue
+
+                                        #print('AAAAAA ', len(candidates))
+                                        ent_t = None
+                                        if cur_ent_t == USER_ENT:
+                                            ent_t = USER_ENT
+                                        else:
+                                            ent_t = EXT_ENT
+                                        key = uid, rel_id, ent_t, cur_ent_id
+                     
+                                    if len(candidates) == 0:
+                                        continue             
+                                    if rel_id == prev_rel:
+                                        path.append( LiteralPath.back_rel )
+                                    else:
+                                        path.append( LiteralPath.fw_rel )
+                                    path.append( f'{LiteralPath.rel_type}{rel_id}' )#rel)
+                                    random.shuffle(candidates)
+                                    
+
+                                    for next_ent_id in candidates:
+                                        if next_ent_id == prev_ent_id and prev_ent_t == cand_type:
+                                            #print('QQQQQ ', next_ent_id, path)
+                                            continue
+                                        if cand_type == USER_ENT:
+                                            if next_ent_id == uid:
+                                                prefix = LiteralPath.main_user
+                                            else:
+                                                prefix = LiteralPath.oth_user
+                                            type_prefix = LiteralPath.user_type
+
+                                        elif cand_type == PROD_ENT:#next_ent_id not in items:
+                                            if cur_hop == n_hop-1:
+                                                assert next_ent_id in user_dict[uid], f'Error: {next_ent_id} not found for user: {uid} in {user_dict[uid]}' 
+                                            if next_ent_id in user_dict[uid]:  
+                                                prefix = LiteralPath.recom_prod
+                                            else:
+                                                prefix = LiteralPath.prod    
+                                            type_prefix = LiteralPath.prod_type                  
+                                        else:              
+                                            prefix = LiteralPath.ent
+                                            type_prefix = LiteralPath.ent_type
+                                        
+
+                                        path.append(prefix)
+
+                                        path.append(f'{type_prefix}{next_ent_id}')
+                                        
+                                        path_str = ''.join([x for x in path])
+                                        if path_str in unique_path_set:
+                                            path.pop()
+                                            path.pop()
+                                            continue
+                                        else:
+                                            unique_path_set.add(path_str)
+                                        path_elems = [cur_ent_t, cand_type, cur_ent_id, next_ent_id, rel_id]
+
+                                        cur_score = 1.
+                                        if scorer is not None:
+                                            # TODO compute score
+                                            cur_local_eid = dataset_info.global_eid_to_cat_eid[cur_ent_t][cur_ent_id]
+                                            next_local_eid = dataset_info.global_eid_to_cat_eid[cand_type][next_ent_id]
+ 
+                                            cur_score = scorer.score(cur_ent_t, cur_local_eid, cand_type, next_local_eid, rel, prev_score=prev_score)                                
+                                        
+                                        next_candidates.append(([x for x in path], path_elems, cur_score))
+                                        path.pop()
+                                        path.pop()
+                                        path.pop()
+                                        path.pop()                                        
+                                        return 
+                                    path.pop()
+                                    path.pop()
+                    for i in range(num_beams):
+                        search_candidate(path_elems, next_candidates, cur_hop, score)
+
+            # topk filter
+            topk_size = num_beams
+            #rint('hop: ', cur_hop)
+            #if len(next_candidates):
+            #    print([ x[0] for x in next_candidates], cur_hop, len(next_candidates[0][0]), len(next_candidates[0]) ) 
+            candidate_paths = next_candidates
+
+            candidate_paths = sorted(candidate_paths, key=lambda x: x[-1], reverse=True)[:topk_size]
+        #if len(candidate_paths):
+        #    print(candidate_paths[0][0], candidate_paths[0][2])
+        return candidate_paths
+                
+                
+
+
+    user_products = list(user_dict[uid])
+    with open(os.path.join(dirpath, f'paths_{uid}.txt' ), 'w') as fp:
+            cnt = 0
+            #progressbar = tqdm(total=max_paths)
+            while cnt < max_paths:
+                cur_hop = 1
+                candidate_paths = []
+                #for i in range(num_beams):
+                pid = random.choice(user_products)
+                if pid not in kg[PROD_ENT]:
+                    continue                
+                cur_ent_id = pid
+
+                rel_id = REL_TYPE2ID[U2P_REL]
+                path = [LiteralPath.main_user, f'{LiteralPath.user_type}{uid}',
+                        LiteralPath.fw_rel, f'{LiteralPath.rel_type}{rel_id}',#U2P_REL, 
+                        LiteralPath.recom_prod, f'{LiteralPath.prod_type}{cur_ent_id}']
+                
+                prev_ent_t = USER_ENT
+                cur_ent_t = PROD_ENT
+                path_elems = [prev_ent_t, cur_ent_t, uid, pid, rel_id]
+                score = 1.
+                if scorer is not None:
+                    # TODO compute score
+                    #print(dataset_info.global_eid_to_cat_eid[prev_ent_t])
+                    cur_local_eid = dataset_info.global_eid_to_cat_eid[prev_ent_t][uid]
+                    #print( len(dataset_info.global_eid_to_cat_eid[cur_ent_t].keys()), len(dataset_info.global_eid_to_cat_eid[cur_ent_t].values())  )
+                    #print(sorted(dataset_info.global_eid_to_cat_eid[cur_ent_t].keys()) )
+                    next_local_eid = dataset_info.global_eid_to_cat_eid[cur_ent_t][pid]   
+                                             
+                    score = scorer.score(prev_ent_t, cur_local_eid, cur_ent_t, next_local_eid, U2P_REL, prev_score=score)      
+                candidate_paths.append((path, path_elems, score))
+                #print(uid, num_beams, max_paths-cnt)
+                candidate_paths = find_candidates(uid, candidate_paths)[: ( min(num_beams, max_paths-cnt) )  ]
+                #print(cnt, len(candidate_paths), max_paths)
+                for path, path_elems, score in candidate_paths:
+                    path = [ str(x) for x in path]
+                    fp.write(' '.join(path) + '\n' )  
+                #print(len(candidate_paths))
+                #print()                
+                cnt += max(len(candidate_paths),1)
+                #progressbar.update(len(candidate_paths))
+
+
+    
+
+
+
+
+
+def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_ENT, U2P_REL, logdir, 
+         user_dict, ignore_rels=set(), max_paths=None, itemset_type='inner', REL_TYPE2ID=None, 
+         collaborative=True,
+         num_beams=10, scorer=None,
+         dataset_info=None, 
+         with_type=True):
     dirpath = logdir#os.path.join(logdir, 'paths3')
     os.makedirs(dirpath, exist_ok=True)
 
     REL_TYPE2ID[U2P_REL] = LiteralPath.interaction_rel_id
     u2p_rel_id = LiteralPath.interaction_rel_id
-    
+    user_prod_cache = dict()
+    unique_path_set = set()    
     def dfs(uid, prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, cur_hop, path, prev_rel):
         if cur_hop >= n_hop:
             path = [ str(x) for x in path]
             #path = [x if isinstance(x,int) else x.item()  for x in path]
             #pathIO.write_to_file(path, n_hop-1, fp)
-            fp.write(' '.join(path) + '\n' )  
+            path_str = ' '.join(path)
+            if path_str in unique_path_set:
+                return False
+            else:
+                unique_path_set.add(path_str)
+
+            fp.write(path_str + '\n' )  
             
             return True
 
@@ -286,11 +499,18 @@ def random_walk_typed(uid, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_
 
                 if cur_hop == n_hop-1:
 
-                    
                     if itemset_type == 'inner':
-                        candidates = list(user_dict[uid].intersection(set(candidates)))
+                        if (rel, cand_type) not in user_prod_cache:
+                            candidates = list(user_dict[uid].intersection(set(candidates)))
+                            user_prod_cache[rel,cand_type] = candidates
+                        else:
+                            candidates = user_prod_cache[rel,cand_type]
                     elif itemset_type == 'outer':
-                        candidates = list(user_dict[uid].intersection(set(candidates)))
+                        if (rel, cand_type) not in user_prod_cache:
+                            candidates = list(set(candidates) - user_dict[uid]   )
+                            user_prod_cache[rel,cand_type] = candidates
+                        else:
+                            candidates = user_prod_cache[rel,cand_type]                                            
                     elif itemset_type == 'all':
                         # candidate set is left unchanged
                         pass
@@ -317,11 +537,12 @@ def random_walk_typed(uid, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_
                           
                     # else the default itemset is used (all  items reachable from current entity, which is not an item at the 'n_hop-1' hop)
                 if len(candidates) == 0:
-                    continue             
-                if rel_id == prev_rel:
-                    path.append( LiteralPath.back_rel )
-                else:
-                    path.append( LiteralPath.fw_rel )
+                    continue         
+                if with_type:    
+                    if rel_id == prev_rel:
+                        path.append( LiteralPath.back_rel )
+                    else:
+                        path.append( LiteralPath.fw_rel )
                 path.append( f'{LiteralPath.rel_type}{rel_id}' )#rel)
                 random.shuffle(candidates)
                 
@@ -347,22 +568,26 @@ def random_walk_typed(uid, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_
                     else:              
                         prefix = LiteralPath.ent
                         type_prefix = LiteralPath.ent_type
-                    path.append(prefix)
+                    if with_type:
+                        path.append(prefix)
 
                     path.append(f'{type_prefix}{next_ent_id}')
                     #dfs(prev_ent_t, uid, cur_ent_t, cur_ent_id, cur_hop, path)
                     if dfs(uid, cur_ent_t, cand_type, cur_ent_id, next_ent_id, cur_hop+1, path, rel_id):#rel):
+                        if with_type:
+                            path.pop()
                         path.pop()
-                        path.pop()
-
-                        path.pop()
+                        if with_type:
+                            path.pop()
                         path.pop()                    
                         return True
-                    path.pop()
+
+                    if with_type:
+                        path.pop()
 
                     path.pop()
-                path.pop()
-
+                if with_type:
+                    path.pop()
                 path.pop()
         return False
     user_products = list(user_dict[uid])
@@ -377,14 +602,19 @@ def random_walk_typed(uid, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_
                 cur_ent_id = pid
 
                 rel_id = REL_TYPE2ID[U2P_REL]
-                path = [LiteralPath.main_user, f'{LiteralPath.user_type}{uid}',
-                        LiteralPath.fw_rel, f'{LiteralPath.rel_type}{rel_id}',#U2P_REL, 
-                        LiteralPath.recom_prod, f'{LiteralPath.prod_type}{cur_ent_id}']
+                if with_type:
+                    path = [LiteralPath.main_user, f'{LiteralPath.user_type}{uid}',
+                            LiteralPath.fw_rel, f'{LiteralPath.rel_type}{rel_id}',#U2P_REL, 
+                            LiteralPath.recom_prod, f'{LiteralPath.prod_type}{cur_ent_id}']
+                else:
+                    path = [f'{LiteralPath.user_type}{uid}',
+                            f'{LiteralPath.rel_type}{rel_id}',#U2P_REL, 
+                            f'{LiteralPath.prod_type}{cur_ent_id}']                                            
 
                 prev_ent_t = USER_ENT
                 cur_ent_t = PROD_ENT
 
-                dfs(uid, prev_ent_t, cur_ent_t, uid, cur_ent_id, cur_hop, path, rel_id)#U2P_REL)
+                dfs(uid, prev_ent_t, cur_ent_t, uid, cur_ent_id, cur_hop, path, rel_id)
                 cnt += 1
     
 
@@ -529,12 +759,13 @@ def update_users(uid, user_dict, pid_to_reachable):
     return uid, reachable
 
 class KGstats:
-    def __init__(self, dataset_name, path, logdir='statistics'):
+    def __init__(self, args, dataset_name, path, logdir='statistics', data_dir=None):
         
         os.makedirs(logdir, exist_ok=True)
         self.logdir = os.path.join(logdir, dataset_name)
         os.makedirs(self.logdir, exist_ok=True)
 
+        self.dataset_info = Dataset(args, data_dir=data_dir)
         ptrie = PathTrie(PATH_PATTERN[dataset_name])
         self.ptrie = ptrie
 
@@ -551,9 +782,10 @@ class KGstats:
         rel_mapping_filepath = os.path.join(path,  f'r_map.txt')
         rel_df = pd.read_csv(rel_mapping_filepath, sep='\t')
         pid_df = pd.read_csv(pid_mapping_filepath, sep='\t')
-        print(pid_df)
+        
         self.pid2eid = { pid : eid for pid,eid in zip(pid_df.pid.values.tolist(), pid_df.eid.values.tolist())  }
-        self.rel_id2type = { int(i) : rel_name for i,rel_name in zip(rel_df.id.values.tolist(), rel_df.name.values.tolist())  }
+        self.rel_id2type = { int(i) : rel_name for i,rel_name in zip(rel_df.id.values.tolist(), rel_df.name.values.tolist())  } 
+        self.rel_id2type[LiteralPath.interaction_rel_id] = INTERACTION[dataset_name]
         #print(self.rel_id2type)
 
         self.rel_type2id = { v:k for k,v in self.rel_id2type.items() }
@@ -639,30 +871,87 @@ class KGstats:
         return kg, kg_np
 
 
-    def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk',itemset_type='inner', collaborative=True):
+    def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk',itemset_type='inner', 
+        collaborative=True, num_beams=0, scorer=None, embedding_root_dir='./',
+        nproc=8,
+        with_type=True):
         user_dict, items = self.user_dict, self.items
         PROD_ENT, U2P_REL =  MAIN_PRODUCT_INTERACTION[self.dataset_name] 
+        if scorer is not None:
+            func = random_walk_typified_beamsearch
+        else:
+            func = random_walk_typified
+        
         # undirected knowledge graph hypotesis (for each relation, there exists its inverse)
-        with mp.Pool(nproc) as pool:
-            pool.starmap( functools.partial(random_walk_typed_collaborative, 
+        '''
+        for uid in tqdm(list(self.user_dict)[11:]):       
+            func(uid, 
+                dataset_name=self.dataset_name,
                 kg=self.aug_kg, 
                 items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, 
                                 USER_ENT=USER, PROD_ENT=PROD_ENT, EXT_ENT=ENTITY, 
                                 U2P_REL=U2P_REL,
-                                pathIO = pathIO,
                                 logdir=os.path.join(self.logdir, logdir),
                                 user_dict=self.train_user_dict,
-                                uid_ext_ent_mapping=d,
-                                uid_outer_ext_ent_mapping=d_outer,
                                 ignore_rels=ignore_rels,
                                 max_paths=max_paths,
                                 itemset_type=itemset_type,
                                 REL_TYPE2ID=self.rel_type2id,
                                 collaborative=collaborative,
+                                num_beams=num_beams,
+                                scorer=scorer,
+                                dataset_info=self.dataset_info)
+
+
+        '''
+
+        with mp.Pool(nproc) as pool:
+            pool.starmap( functools.partial(func,             
+            #func(uid, 
+                dataset_name=self.dataset_name,
+                kg=self.aug_kg, 
+                items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, 
+                                USER_ENT=USER, PROD_ENT=PROD_ENT, EXT_ENT=ENTITY, 
+                                U2P_REL=U2P_REL,
+                                logdir=os.path.join(self.logdir, logdir),
+                                user_dict=self.train_user_dict,
+                                ignore_rels=ignore_rels,
+                                max_paths=max_paths,
+                                itemset_type=itemset_type,
+                                REL_TYPE2ID=self.rel_type2id,
+                                collaborative=collaborative,
+                                num_beams=num_beams,
+                                scorer=scorer,
+                                dataset_info=self.dataset_info,
+                                with_type=with_type)
+            ,
+                tqdm([[uid] for uid in self.user_dict ] ))
+
+
+        #'''
+
+        '''
+        with mp.Pool(nproc) as pool:
+            pool.starmap( functools.partial(func, 
+                dataset_name=self.dataset_name,
+                kg=self.aug_kg, 
+                items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, 
+                                USER_ENT=USER, PROD_ENT=PROD_ENT, EXT_ENT=ENTITY, 
+                                U2P_REL=U2P_REL,
+                                logdir=os.path.join(self.logdir, logdir),
+                                user_dict=self.train_user_dict,
+                                ignore_rels=ignore_rels,
+                                max_paths=max_paths,
+                                itemset_type=itemset_type,
+                                REL_TYPE2ID=self.rel_type2id,
+                                collaborative=collaborative,
+                                num_beams=num_beams,
+                                scorer=scorer,
                                 ),
                 tqdm([[uid] for uid in self.user_dict ])
                 #               #tqdm([[pid] for pid in self.items ])  
-                                )             
+                                )   
+        '''          
 
         #kg_copy = dict()
         #for ent in self.kg:

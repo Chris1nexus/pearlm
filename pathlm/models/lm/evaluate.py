@@ -96,7 +96,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     Recommendation and explanation generation
     """
     set_seed(SEED)
-    dataset_name = args.data
+    dataset_name = args.dataset
     data_dir = f"data/{dataset_name}"
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     TOKENIZER_TYPE = "WordLevel"
@@ -168,7 +168,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
                     if len(recommended_token) < 2  or not recommended_token.startswith("P"):
 
                             non_product_count += 1
-                            continue
+                            pass
                     #print(output)
                     topk[uid].append(recommended_item)
                 pbar.update(1)
@@ -224,7 +224,7 @@ def generate_topks_withBPE(model, uids: List[str], args: argparse.Namespace):
     Recommendation and explanation generation
     """
     set_seed(SEED)
-    dataset_name = args.data
+    dataset_name = args.dataset
     tokenizer = AutoTokenizer.from_pretrained(args.model, use_fast=True)
     eid2name = get_eid_to_name_map(f"data/{dataset_name}")
     name2id = {v: k for k, v in eid2name.items()}
@@ -263,7 +263,7 @@ def evaluate(model, args: argparse.Namespace):
     Recommendation evaluation
     """
     #random_baseline(args)
-    dataset_name = args.data
+    dataset_name = args.dataset
     custom_model_name = model.name_or_path.split("/")[-1]
     test_set = get_set(dataset_name, set_str='test')
 
@@ -298,7 +298,7 @@ def random_baseline(args: argparse.Namespace):
     """
     Recommendation evaluation
     """
-    dataset_name = args.data
+    dataset_name = args.dataset
     test_set = get_set(dataset_name, set_str='test')
 
     def get_user_negatives(dataset_name: str) -> Dict[str, List[str]]:
