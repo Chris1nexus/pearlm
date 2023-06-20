@@ -1,7 +1,7 @@
 from easydict import EasyDict as edict
 
-from pathlm.models.PGPR.pgpr_utils import *
-from pathlm.models.PGPR.data_utils import Dataset
+from pathlm.models.rl.PGPR.pgpr_utils import *
+from pathlm.models.rl.PGPR.data_utils import Dataset
 
 class KnowledgeGraph(object):
 

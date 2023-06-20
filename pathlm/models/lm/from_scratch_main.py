@@ -6,6 +6,8 @@ import pickle
 import random
 from collections import defaultdict
 from typing import List, Dict
+
+from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
 import multiprocessing as mp
 import itertools
@@ -16,8 +18,8 @@ import torch
 import numpy as np
 from datasets import load_from_disk, DatasetDict, Dataset
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
-    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, PhrasalConstraint, LogitsProcessorList, set_seed, pipeline \
-
+    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, PhrasalConstraint, LogitsProcessorList, \
+    set_seed, pipeline, GPT2LMHeadModel
 from pathlm.models.lm.generation_constraints import TypifiedForceLastTokenLogitsProcessorWordLevel
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS
@@ -40,8 +42,67 @@ from tokenizers import (
 )
 
 
+#TODO: TEST FORWARD + LOSS
+class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.num_labels = config.vocab_size
 
+        # Create an additional linear layer for the second prediction head
+        self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
+        self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
 
+        # Create type embedding layer
+        self.type_embeddings = torch.nn.Embedding(num_embeddings=config.n_positions, embedding_dim=config.n_embd) # for entities, relations, and special tokens
+
+    def forward(self, input_ids=None, type_ids=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None,
+                head_mask=None, inputs_embeds=None, labels=None, use_cache=None, output_attentions=None,
+                output_hidden_states=None, return_dict=None):
+
+        # Compute type embeddings
+        type_embs = self.type_embeddings(type_ids)
+
+        transformer_outputs = self.transformer(input_ids,
+                                               past=past,
+                                               attention_mask=attention_mask,
+                                               head_mask=head_mask,
+                                               inputs_embeds=inputs_embeds + type_embs,  # Add type embeddings here
+                                               use_cache=use_cache,
+                                               output_attentions=output_attentions,
+                                               output_hidden_states=output_hidden_states,
+                                               return_dict=return_dict)
+
+        hidden_states = transformer_outputs[0]
+
+        # Pass hidden states through linear layers to get predictions
+        lm_entity_head = self.lm_entity_head(hidden_states)
+        lm_relation_head = self.lm_relation_head(hidden_states)
+
+        return lm_entity_head, lm_relation_head
+
+def two_head_loss(entity_token_logits, relation_token_logits, entity_token_labels, relation_token_labels):
+    loss_fct = CrossEntropyLoss()
+    entity_loss = loss_fct(entity_token_logits.view(-1, entity_token_logits.size(-1)), entity_token_labels.view(-1))
+    relation_loss = loss_fct(relation_token_logits.view(-1, relation_token_logits.size(-1)), relation_token_labels.view(-1))
+    return entity_loss + relation_loss
+
+#TODO: TEST WITHOUT GROUP TEXTS
+def generate_type_ids(sequence):
+    # Define type ids for special tokens, entities, and relations
+    SPECIAL_ID = 0
+    ENTITY_ID = 1
+    RELATION_ID = 2
+
+    type_ids = []
+    for idx, token_id in enumerate(sequence['input_ids']):
+        if idx == 0 or idx == len(sequence['input_ids']) - 1:
+            type_ids.append(SPECIAL_ID)
+        elif idx % 2 == 1:
+            type_ids.append(ENTITY_ID)
+        elif idx % 2 == 0:
+            type_ids.append(RELATION_ID)
+    sequence['type_ids'] = ' '.join(type_ids)
+    return sequence
 
 
 class CustomTrainer(Trainer):
@@ -221,37 +282,22 @@ class CustomTrainer(Trainer):
 def tokenize_function(examples: str, context_length: int=100):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
-def group_texts(examples: List[str], block_size=256):
-    # Concatenate all texts.
-    concatenated_examples = {k: sum(examples[k], []) for k in examples.keys()}
-    total_length = len(concatenated_examples[list(examples.keys())[0]])
-    # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-        # customize this part to your needs.
-    total_length = (total_length // block_size) * block_size
-    # Split by chunks of max_len.
-    result = {
-        k: [t[i : i + block_size] for i in range(0, total_length, block_size)]
-        for k, t in concatenated_examples.items()
-    }
-    result["labels"] = result["input_ids"].copy()
-    return result
-
 def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace):
-    
     embed_filepath = os.path.join(args.embedding_root_dir, args.dataset, args.emb_filename)
     try:
         embeds = pickle.load(open(embed_filepath, 'rb'))
     except:
         embeds = None
-    
+
 
     config_kwargs ={        
         'vocab_size':len(tokenizer),
         'n_ctx':context_length,
-        #n_positions=context_length,
+        'n_positions': context_length,
         'pad_token_id':tokenizer.pad_token_id,
         'bos_token_id':tokenizer.bos_token_id,
-        'eos_token_id':tokenizer.eos_token_id,}
+        'eos_token_id':tokenizer.eos_token_id,
+    }
     if embeds:
         config_kwargs.update({
         'hidden_size':args.emb_size,
@@ -265,15 +311,15 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     )
 
     # Initializing a model from the configuration
+    #model = DistilGPT2TwoHeadModel(config)
     model = AutoModelForCausalLM.from_config(config)
-    if embeds:
 
-        
+    if embeds:
         ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
         # Dataset directories.
         dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
         
-        data_dir_mapping= os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
+        data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
         kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)  
 
         mapper = EmbeddingMapper(tokenizer, kg, embeds)      
@@ -281,7 +327,9 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     # Training arguments
     custom_name = f"from_scratch-{args.dataset}-{args.model}"
 
-    
+    #TODO: Add to the dataset the type_ids
+    #tokenized_dataset.map(generate_type_ids, batched=False, num_proc=args.nproc)
+
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         f"clm-{custom_name}",
@@ -292,7 +340,6 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         weight_decay=0.01,
         bf16=False,
         fp16=False,
-        #no_cuda=True,
         logging_first_step=True,
         #use_mps_device=True,
         num_train_epochs=1,
@@ -314,13 +361,6 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         tokenizer.pad_token = tokenizer.eos_token
         data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    #trainer = Trainer(
-    #    model=model,
-    #    args=training_args,
-    #    train_dataset=tokenized_dataset["train"],
-    #    eval_dataset=tokenized_dataset["test"],
-    #    data_collator=data_collator,
-    #)
     trainer = CustomTrainer(
         dataset_name=args.dataset,
         n_hop=args.n_hop,
@@ -391,7 +431,7 @@ if __name__ == "__main__":
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,
                         help="Number of elements in a predicted sequence (considering only the ids)")    
-    parser.add_argument("--load_data", type=bool, default=False, help="")
+    parser.add_argument("--load_data", type=bool, default=True, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--eval_ckpt_iter", type=int, default='10000', help="")
@@ -399,7 +439,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_seq_infer", type=int, default=10, help="Number of sequences generated for each user at inference time")
 
     parser.add_argument("--embedding_root_dir", type=str, default="./embedding-weights", help="default: ./embedding-weights")
-    parser.add_argument("--emb_filename", type=str, default=None, help="default: 'transe_embed.pkl'")
+    parser.add_argument("--emb_filename", type=str, default='transe_embed.pkl', help="default: 'transe_embed.pkl'")
     parser.add_argument("--emb_size", type=int, default=100, help="Transformer Embedding size (must match external embedding size, if chosen)")
     
     args = parser.parse_args()
@@ -473,8 +513,8 @@ if __name__ == "__main__":
             trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
             tokenizer.train_from_iterator(dataset["path"], trainer=trainer)
             tokenizer.post_processor = processors.TemplateProcessing(
-                single="[EOS]:0 $A:0 [BOS]:0",
-                special_tokens=[("[EOS]", tokenizer.token_to_id("[EOS]")), ("[BOS]", tokenizer.token_to_id("[BOS]"))]
+                single="[BOS]:0 $A:0 [EOS]:0",
+                special_tokens=[("[BOS]", tokenizer.token_to_id("[BOS]")), ("[EOS]", tokenizer.token_to_id("[EOS]"))]
             )
             
             tokenizer.save(tokenizer_file)
@@ -493,9 +533,6 @@ if __name__ == "__main__":
 
         # Load the specified tokenizer
         print("Train/Validation split...")
-        # Add 'user_id' to the dataset
-        #dataset_split = dataset.map(add_user_id, num_proc=args.nproc)
-        # Now, we'll stratify by 'user_id'
         dataset_split = dataset.train_test_split(test_size=0.05, stratify_by_column='user_id')
         # Convert DatasetDict to desired format
         dataset_split = DatasetDict({
@@ -503,19 +540,9 @@ if __name__ == "__main__":
             'test': dataset_split['test'].remove_columns('user_id'),
         })
 
-        # Tokenizer and tokenization function
-        #tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=args.context_length,
-        #                            eos_token="[EOS]", bos_token="[BOS]",
-        #                            pad_token="[PAD]", unk_token="[UNK]",
-        #                            mask_token="[MASK]", use_fast=True)   
-        #tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
-        #                                    eos_token="[EOS]", bos_token="[BOS]",
-        #                                    pad_token="[PAD]", unk_token="[UNK]",
-        #                                    mask_token="[MASK]", use_fast=True)
         print("Tokenizing dataset...")
         pre1 = f"data/{dataset_name}/{TOKENIZER_TYPE}/pre1_from_scratch_tokenized_dataset.hf"
 
-        
         if not os.path.exists(pre1):
             tokenized_dataset = dataset_split.map(tokenize_function, 
                 batched=True, 
@@ -526,21 +553,7 @@ if __name__ == "__main__":
             tokenized_dataset.save_to_disk(pre1)
         else:
             tokenized_dataset = load_from_disk(pre1)
-        
-        # Group texts into chunks of block_size tokens
-        pre2 = f"data/{dataset_name}/{TOKENIZER_TYPE}/pre2_from_scratch_tokenized_dataset.hf"        
-        
-        if not os.path.exists(pre2):        
-            tokenized_dataset = tokenized_dataset.map(
-                group_texts,
-                batched=True,
-                batch_size=1000,
-                num_proc=args.nproc,
-            )
-            check_dir(pre2)
-            tokenized_dataset.save_to_disk(pre2)
-        else:
-            tokenized_dataset = load_from_disk(pre2)
+
         # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
         check_dir(f"{data_dir}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")
         tokenized_dataset.save_to_disk(f"data/{dataset_name}/{TOKENIZER_TYPE}/from_scratch_tokenized_dataset.hf")

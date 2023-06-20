@@ -12,13 +12,13 @@ import pandas as pd
 from collections import deque
 import random
 
-from pathlm.models.PGPR.pgpr_utils import *
+from pathlm.models.rl.PGPR.pgpr_utils import *
 from pathlm.sampling.container.kg import KnowledgeGraph
 from pathlm.sampling.container.path_trie import PathTrie
 from pathlm.sampling.container.file_io import PathFileIO
 from pathlm.sampling.container.constants import LiteralPath
 from pathlm.sampling.scoring.scorer  import TransEScorer
-from pathlm.models.PGPR.data_utils import Dataset
+from pathlm.models.rl.PGPR.data_utils import Dataset
 
 
 def bfs(pid, aug_kg, ptrie, n_hop, product_entity_name, user_entity_name, u2p_rel_name):
