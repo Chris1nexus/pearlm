@@ -59,7 +59,7 @@ class TypifiedForceLastTokenLogitsProcessorWordLevel(LogitsProcessor):
             force_tokens = None
             uid = None
             user_tokens = None
-            UID_POS = 1 
+            UID_POS = 0#1 
             #print()
             min_score = scores.min()
             for idx in range(scores.shape[0]):

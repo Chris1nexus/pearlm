@@ -507,8 +507,8 @@ class CustomTrainer(Trainer):
             for output_batch in outputs:
                     for output in output_batch:
                         output = output['generated_text'].split(" ")
-                        uid = output[1][1:]
-
+                        #uid = output[1][1:]
+                        uid = output[0][1:]
                         recommended_token = output[-1]
                         recommended_item = recommended_token[1:]
                         if len(recommended_token) < 2  or not recommended_token.startswith("P"):
