@@ -87,8 +87,15 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
 
         self.ent_mask = config.ent_mask
         self.rel_mask = config.rel_mask
-        self.ent_mask = torch.FloatTensor(self.ent_mask)
-        self.rel_mask = torch.FloatTensor(self.rel_mask)        
+        self.ent_mask_weight = torch.FloatTensor(self.ent_mask)
+        self.rel_mask_weight = torch.FloatTensor(self.rel_mask)      
+        self.ent_mask = torch.LongTensor(self.ent_mask)
+        self.rel_mask = torch.LongTensor(self.rel_mask)      
+        self.context_length = config.n_ctx
+
+        idxs = [i%2 == 0 for i in range(self.context_length)  ]
+        #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(self.context_length)] )
+        self.even_idx_mask = torch.BoolTensor(idxs)
         
         self.num_kg_types = len(DistilGPT2TwoHeadModel.kg_categories)
 
@@ -99,6 +106,9 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #self.test_type_ids, self.test_type_embeds = self.__init_type_embeddings(self.config.test_batch_size, seq_len)
         self.type_ids_cache = dict()
         self.type_embeds_cache = dict()
+        self.idx_mask_cache = dict()
+
+        self.type_ids_row, self.type_embeds_row = self.__init_type_embeddings(1, self.context_length)
 
         # Create an additional linear layer for the second prediction head
         self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
@@ -121,6 +131,16 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         type_ids = type_ids.to(self.type_embeddings.weight.device)
         type_embeds = self.type_embeddings(type_ids)
         return type_ids, type_embeds
+
+    def __get_type_embeds(self, n_rows, n_cols):
+        row = self.type_ids_row[:,:(n_cols-1)]
+        row = torch.hstack( [row, torch.ones((1,1))*  DistilGPT2TwoHeadModel.SPECIAL_ID  ] )
+        type_ids = torch.vstack([row for _ in range(n_rows)]) 
+        return type_ids, self.type_embeddings(type_ids.to(self.type_embeddings.weight.device))
+    def __get_even_idx_mask(self,n_rows, n_cols):
+        mask_key = (n_rows,n_cols)
+        cur_mask = self.even_idx_mask[:(n_cols) ]            
+        return torch.vstack([cur_mask for _ in range(n_rows) ] )
     def parallelize(self, device_map=None):
         warnings.warn(
             "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
@@ -231,6 +251,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #    torch.cuda.set_device(inputs_embeds.device)
         #    type_embeds = type_embeds.to(inputs_embeds.device)
         
+        
         if inputs_embeds is not None:
             input_embeds += type_embeds
 
@@ -273,6 +294,9 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
 
 
         '''
+        
+        start,E,R,E,R,E,R,E,end
+
         start,E,R,E,R,E,end
 
         start,E,R,E,R,E
@@ -289,46 +313,86 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         start,R,R,end      #(slice)[1:]   labels
         '''
 
-        def compute_loss(logits, labels, class_mask):
-            class_mask = class_mask.to(logits.device)
+        def compute_loss(logits, labels, class_mask=None):
+            if class_mask is not None:
+                class_mask = class_mask.to(logits.device)
             loss_fct = CrossEntropyLoss(weight=class_mask)
             logits = logits.contiguous()
             labels = labels.contiguous()
             lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1).to(logits.device)) 
-            return lm_loss           
+            return lm_loss  
+        '''         
         loss = 0.
         # entity pred mask
         logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
         label_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:, 1:(-1)]#.unsqueeze(-1)
+        
         #print(logits_mask.shape)
         #print(label_mask.shape)
         #print(lm_entity_logits[:,:(-1),:].shape)
         #print( input_ids[:,1:(-1)].shape)
         #print()
-        loss += compute_loss( lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],
-                    self.ent_mask)
+
+        batch_size = input_ids.shape[0]
+        sequence_len = input_ids.shape[-1]
+        
+        #idxs = [i%2 == 0 for i in range(sequence_len-1) ]
+        #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(batch_size)] )
+
+
+        #mask_key = (batch_size,sequence_len-1)
+        #if mask_key not in self.idx_mask_cache:        
+        #    self.idx_mask_cache[mask_key] = self.__get_even_idx_mask(batch_size, sequence_len-1)
+        #idx_mask = self.idx_mask_cache[mask_key].to(lm_entity_logits.device)
+
+        loss += compute_loss(lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask]#lm_entity_logits[:,:-1,:][idx_mask,:],input_ids[:,1:][idx_mask],
+                        #lm_entity_logits[:,:-1,:][:,idxs,:],input_ids[:,1:][:,idxs], #lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],
+                    self.ent_mask_weight)
 
 
         # relation pred mask
         logits_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:,1:(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
         label_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:,1:]#.unsqueeze(-1)
+        
         #print(logits_mask.shape)
         #print(label_mask.shape)
         #print(lm_relation_logits[:,1:(-1),:].shape)
         #print( input_ids[:,1:].shape)        
         #print()
         #print()
-        loss += compute_loss( lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],
-                    self.rel_mask)
+        
+        #idxs = [i%2 == 1 for i in range(sequence_len-1)  ]
+        #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(batch_size)] )
+        #print(idx_mask.device)
+        #idx_mask = torch.logical_not(self.idx_mask_cache[mask_key].to(lm_entity_logits.device))
+        loss += compute_loss(lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],#lm_relation_logits[:,:-1,:][idx_mask,:], input_ids[:,1:][idx_mask],
+                    #lm_relation_logits[:,:-1,:][:,idxs,:], input_ids[:,1:][:,idxs],  #lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],
+                    self.rel_mask_weight)
 
+        #idxs = [[i%2 == 0 for _ in range(lm_entity_logits.shape[-1]) ]     for i in range(sequence_len) ]
+        #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(batch_size)] ).to(lm_entity_logits.device)
+        '''
 
+        batch_size = input_ids.shape[0]
+        sequence_len = input_ids.shape[-1]        
+        mask_key = (batch_size,sequence_len)
+        if mask_key not in self.idx_mask_cache:         
+            self.idx_mask_cache[mask_key] =  self.__get_even_idx_mask(batch_size, sequence_len) 
+        idx_mask = self.idx_mask_cache[mask_key]
+        mask_key = (batch_size,sequence_len,lm_entity_logits.shape[-1])
+        if mask_key not in self.idx_mask_cache:
+            idx_mask = torch.stack([idx_mask for _ in range(lm_entity_logits.shape[-1])], dim=-1)#.to(lm_entity_logits.device)
+            self.idx_mask_cache[mask_key] =  idx_mask
+        idx_mask = self.idx_mask_cache[mask_key]
+        logits =  torch.where(idx_mask.to(lm_entity_logits.device),lm_entity_logits, lm_relation_logits) 
+        loss = compute_loss(logits[:,:-1,:], input_ids[:,1:])
         if not return_dict:
-            output = (lm_entity_logits,) + transformer_outputs[1:]
+            output = (logits,) + transformer_outputs[1:]
             return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=lm_entity_logits,
+            logits=logits,#lm_entity_logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
@@ -382,7 +446,9 @@ class CustomTrainer(Trainer):
         self.n_hop = n_hop
         self.eval_device = eval_device
 
-        self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+        #self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+        self.SEQUENCE_LEN =  2 + n_hop+1 + n_hop  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+
         self.LAST_TOKEN_POS = self.SEQUENCE_LEN-1
         self.INFERENCE_BATCH_SIZE = args.infer_batch_size
         self.N_SEQUENCES_PER_USER = n_sequences_per_user
@@ -404,7 +470,8 @@ class CustomTrainer(Trainer):
 
         #'''
 
-        init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
+        #init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
+        init_condition_fn = lambda uid: f"U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
         
 
@@ -563,6 +630,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         'eos_token_id':tokenizer.eos_token_id,
     }
     if embeds:
+        print('Using embeddings: ',args.emb_filename)
         config_kwargs.update({
         'hidden_size':args.emb_size,
         'num_attention_heads':args.emb_size//10
@@ -581,8 +649,8 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
 
     # Initializing a model from the configuration
     #model = DistilGPT2TwoHeadModel(config)
-    #model = AutoModelForCausalLM.from_config(config)
-    model = DistilGPT2TwoHeadModel(config)
+    model = AutoModelForCausalLM.from_config(config)
+    #model = DistilGPT2TwoHeadModel(config)
 
     if embeds:
         ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
