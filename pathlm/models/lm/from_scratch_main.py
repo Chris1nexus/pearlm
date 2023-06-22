@@ -20,6 +20,31 @@ from datasets import load_from_disk, DatasetDict, Dataset
 from transformers import AutoTokenizer, AutoModelForMaskedLM, AutoModelForCausalLM, TrainingArguments, Trainer, \
     DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, PhrasalConstraint, LogitsProcessorList, \
     set_seed, pipeline, GPT2LMHeadModel
+
+
+
+import warnings
+from dataclasses import dataclass
+from typing import Optional, Tuple, Union
+
+import torch
+import torch.utils.checkpoint
+from torch import nn
+from torch.cuda.amp import autocast
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPastAndCrossAttentions,
+    CausalLMOutputWithCrossAttentions,
+)
+
+from transformers.utils.model_parallel_utils import assert_device_map, get_device_map
+from transformers.models.gpt2.configuration_gpt2 import GPT2Config
+
+
+
+
+
 from pathlm.models.lm.generation_constraints import TypifiedForceLastTokenLogitsProcessorWordLevel
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS
@@ -29,7 +54,7 @@ from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k 
 from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.sampling.container.kg_analyzer import KGstats
-
+from pathlm.sampling.container.constants import LiteralPath
 
 from tokenizers import (
     decoders,
@@ -42,49 +67,276 @@ from tokenizers import (
 )
 
 
+
+
+
+
+
+
 #TODO: TEST FORWARD + LOSS
 class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
+    SPECIAL_ID = 0
+    ENTITY_ID = 1
+    RELATION_ID = 2
+    kg_categories = [SPECIAL_ID, ENTITY_ID, RELATION_ID] 
+
     def __init__(self, config):
         super().__init__(config)
+        self.config = config
         self.num_labels = config.vocab_size
+
+        self.ent_mask = config.ent_mask
+        self.rel_mask = config.rel_mask
+        self.ent_mask = torch.FloatTensor(self.ent_mask)
+        self.rel_mask = torch.FloatTensor(self.rel_mask)        
+        
+        self.num_kg_types = len(DistilGPT2TwoHeadModel.kg_categories)
+
+        # Create type embedding layer
+        self.type_embeddings = torch.nn.Embedding(num_embeddings=self.num_kg_types, embedding_dim=config.n_embd) # for entities, relations, and special tokens
+
+        #self.train_type_ids, self.train_type_embeds = self.__init_type_embeddings(self.config.train_batch_size, seq_len)
+        #self.test_type_ids, self.test_type_embeds = self.__init_type_embeddings(self.config.test_batch_size, seq_len)
+        self.type_ids_cache = dict()
+        self.type_embeds_cache = dict()
 
         # Create an additional linear layer for the second prediction head
         self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
         self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
 
-        # Create type embedding layer
-        self.type_embeddings = torch.nn.Embedding(num_embeddings=config.n_positions, embedding_dim=config.n_embd) # for entities, relations, and special tokens
 
-    def forward(self, input_ids=None, type_ids=None, past=None, attention_mask=None, token_type_ids=None, position_ids=None,
-                head_mask=None, inputs_embeds=None, labels=None, use_cache=None, output_attentions=None,
-                output_hidden_states=None, return_dict=None):
+    def __init_type_embeddings(self,  batch_size, num_hops):
+        #num_hops = self.config.num_hops
+        n_tokens = num_hops#num_hops + 1 + num_hops + 2
+        type_ids = torch.ones((batch_size,n_tokens) , dtype=torch.long)
 
-        # Compute type embeddings
-        type_embs = self.type_embeddings(type_ids)
 
-        transformer_outputs = self.transformer(input_ids,
-                                               past=past,
-                                               attention_mask=attention_mask,
-                                               head_mask=head_mask,
-                                               inputs_embeds=inputs_embeds + type_embs,  # Add type embeddings here
-                                               use_cache=use_cache,
-                                               output_attentions=output_attentions,
-                                               output_hidden_states=output_hidden_states,
-                                               return_dict=return_dict)
+        for i in range(n_tokens):
+            if i == 0 or i == n_tokens-1:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.SPECIAL_ID
+            elif i % 2 == 1:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.ENTITY_ID
+            elif i % 2 == 0:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.RELATION_ID
+        type_ids = type_ids.to(self.type_embeddings.weight.device)
+        type_embeds = self.type_embeddings(type_ids)
+        return type_ids, type_embeds
+    def parallelize(self, device_map=None):
+        warnings.warn(
+            "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
+            " your model with `device_map='balanced'` in the call to `from_pretrained`. You can also provide your own"
+            " `device_map` but it needs to be a dictionary module_name to device, so for instance {'transformer.h.0':"
+            " 0, 'transformer.h.1': 1, ...}",
+            FutureWarning,
+        )
+        self.device_map = (
+            get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
+            if device_map is None
+            else device_map
+        )
+        assert_device_map(self.device_map, len(self.transformer.h))
+
+        self.transformer.parallelize(self.device_map)
+        self.type_embeddings = self.type_embeddings.to(self.transformer.first_device)
+        self.lm_entity_head = self.lm_entity_head.to(self.transformer.first_device)
+        self.lm_relation_head = self.lm_relation_head.to(self.transformer.first_device)
+        self.model_parallel = True
+
+    def deparallelize(self):
+        warnings.warn(
+            "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
+            FutureWarning,
+        )
+        self.transformer.deparallelize()
+        self.type_embeddings = self.type_embeddings.to("cpu")
+        self.transformer = self.transformer.to("cpu")
+        self.lm_entity_head = self.lm_entity_head.to("cpu")
+        self.lm_relation_head = self.lm_relation_head.to("cpu")
+        self.model_parallel = False
+        torch.cuda.empty_cache()
+
+    #def get_output_embeddings(self):
+    #    return self.lm_entity_head
+
+    #def set_output_embeddings(self, new_embeddings):
+    #    self.lm_entity_head = new_embeddings
+
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+        token_type_ids = kwargs.get("token_type_ids", None)
+        # only last token for inputs_ids if past is defined in kwargs
+        if past_key_values:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids[:, -1].unsqueeze(-1)
+
+        attention_mask = kwargs.get("attention_mask", None)
+        position_ids = kwargs.get("position_ids", None)
+
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -1].unsqueeze(-1)
+        else:
+            position_ids = None
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "position_ids": position_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+            }
+        )
+        return model_inputs
+
+
+
+
+    def forward(
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            encoder_hidden_states: Optional[torch.Tensor] = None,
+            encoder_attention_mask: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+        ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+
+        batch_size, seq_len = input_ids.shape
+        k = (batch_size, seq_len) 
+        if k not in self.type_ids_cache:
+            type_ids, type_embeds = self.__init_type_embeddings(batch_size, seq_len)
+
+            self.type_ids_cache[k], self.type_embeds_cache[k] = type_ids, type_embeds
+        
+        type_ids, type_embeds = self.type_ids_cache[k], self.type_embeds_cache[k]
+        #if self.model_parallel:
+        #    torch.cuda.set_device(inputs_embeds.device)
+        #    type_embeds = type_embeds.to(inputs_embeds.device)
+        
+        if inputs_embeds is not None:
+            input_embeds += type_embeds
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
 
         hidden_states = transformer_outputs[0]
+        # Set device for model parallelism
+        if self.model_parallel:
+            torch.cuda.set_device(self.transformer.first_device)
+            hidden_states = hidden_states.to(self.lm_entity_head.weight.device)
 
-        # Pass hidden states through linear layers to get predictions
-        lm_entity_head = self.lm_entity_head(hidden_states)
-        lm_relation_head = self.lm_relation_head(hidden_states)
 
-        return lm_entity_head, lm_relation_head
+        # Get indexes of type embeddings
+        #entity_token_ids = types_ids == DistilGPT2TwoHeadModel.ENTITY_ID
+        #relation_token_ids = types_ids == DistilGPT2TwoHeadModel.RELATION_ID
 
-def two_head_loss(entity_token_logits, relation_token_logits, entity_token_labels, relation_token_labels):
-    loss_fct = CrossEntropyLoss()
-    entity_loss = loss_fct(entity_token_logits.view(-1, entity_token_logits.size(-1)), entity_token_labels.view(-1))
-    relation_loss = loss_fct(relation_token_logits.view(-1, relation_token_logits.size(-1)), relation_token_labels.view(-1))
-    return entity_loss + relation_loss
+        # Get logits from the two heads, first based on entity tokens, then on relation tokens
+        lm_entity_logits = self.lm_entity_head(hidden_states)#[entity_token_ids])
+        lm_relation_logits = self.lm_relation_head(hidden_states)#[relation_token_ids])
+
+
+
+
+
+        '''
+        start,E,R,E,R,E,end
+
+        start,E,R,E,R,E
+        E,R,E,R,E,end
+
+        # ent
+        start,R,R,end
+        start,E,E,E,end  #(slice)
+        start,R,R,end     # [:(-1)]
+        E,E,E,end  #(slice) [1:-1]   labels       
+
+        # rel
+        start,E,E,E,end   #(slice) [1:-1]  preds 
+        start,R,R,end      #(slice)[1:]   labels
+        '''
+
+        def compute_loss(logits, labels, class_mask):
+            class_mask = class_mask.to(logits.device)
+            loss_fct = CrossEntropyLoss(weight=class_mask)
+            logits = logits.contiguous()
+            labels = labels.contiguous()
+            lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1).to(logits.device)) 
+            return lm_loss           
+        loss = 0.
+        # entity pred mask
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:, 1:(-1)]#.unsqueeze(-1)
+        #print(logits_mask.shape)
+        #print(label_mask.shape)
+        #print(lm_entity_logits[:,:(-1),:].shape)
+        #print( input_ids[:,1:(-1)].shape)
+        #print()
+        loss += compute_loss( lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],
+                    self.ent_mask)
+
+
+        # relation pred mask
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:,1:(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:,1:]#.unsqueeze(-1)
+        #print(logits_mask.shape)
+        #print(label_mask.shape)
+        #print(lm_relation_logits[:,1:(-1),:].shape)
+        #print( input_ids[:,1:].shape)        
+        #print()
+        #print()
+        loss += compute_loss( lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],
+                    self.rel_mask)
+
+
+        if not return_dict:
+            output = (lm_entity_logits,) + transformer_outputs[1:]
+            return ((loss,) + output) if loss is not None else output
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=loss,
+            logits=lm_entity_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+            cross_attentions=transformer_outputs.cross_attentions,
+        )
+
+
+
 
 #TODO: TEST WITHOUT GROUP TEXTS
 def generate_type_ids(sequence):
@@ -289,6 +541,18 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     except:
         embeds = None
 
+    ent_mask = []
+    rel_mask = []
+    class_weight = 1.
+    for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda x: x[1]):
+        if token[0] == LiteralPath.rel_type or not token[0].isalpha():
+            rel_mask.append(class_weight)
+        else:
+            rel_mask.append(0)
+        if token[0] != LiteralPath.rel_type :
+            ent_mask.append(class_weight)
+        else:
+            ent_mask.append(0)
 
     config_kwargs ={        
         'vocab_size':len(tokenizer),
@@ -309,10 +573,16 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         model_name,
         **config_kwargs
     )
+    config.update({        'num_hops': args.n_hop,
+        'train_batch_size':args.batch_size,
+        'test_batch_size':args.infer_batch_size,
+        'ent_mask': ent_mask,
+        'rel_mask': rel_mask})
 
     # Initializing a model from the configuration
     #model = DistilGPT2TwoHeadModel(config)
-    model = AutoModelForCausalLM.from_config(config)
+    #model = AutoModelForCausalLM.from_config(config)
+    model = DistilGPT2TwoHeadModel(config)
 
     if embeds:
         ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
@@ -431,7 +701,7 @@ if __name__ == "__main__":
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,
                         help="Number of elements in a predicted sequence (considering only the ids)")    
-    parser.add_argument("--load_data", type=bool, default=True, help="")
+    parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--eval_ckpt_iter", type=int, default='10000', help="")
