@@ -44,3 +44,11 @@ def get_user_negatives_tokens_ids(dataset_name: str, tokenizer) -> Dict[str, Lis
         val_items = [tokenizer.convert_tokens_to_ids(f"P{item}") for item in valid_set[uid]]        
         uid_negatives[uid] = list(set(ikg_token_ids - set(train_items) - set(val_items) - set([0])))
     return uid_negatives
+
+def get_user_positives(dataset_name: str) -> Dict[str, List[str]]:
+    uid_positives = {}
+    train_set = get_set(dataset_name, set_str='train')
+    valid_set = get_set(dataset_name, set_str='valid')
+    for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
+        uid_positives[uid] = list(set(train_set[uid]).union(set(valid_set[uid])))
+    return uid_positives
