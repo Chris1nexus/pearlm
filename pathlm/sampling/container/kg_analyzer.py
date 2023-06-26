@@ -247,7 +247,9 @@ def random_walk_typed_content_based(uid, kg, items, n_hop, KG2T, R2T, PROD_ENT, 
 
 def random_walk_typified_beamsearch(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_ENT, PROD_ENT, EXT_ENT, U2P_REL, logdir, 
         user_dict, ignore_rels=set(), max_paths=None, itemset_type='inner', REL_TYPE2ID=None, collaborative=True,
-        num_beams=10, scorer=None, dataset_info=None):
+        num_beams=10, scorer=None, dataset_info=None,
+                 start_ent_type=USER,
+         end_ent_type=PRODUCT):
     dirpath = logdir
     os.makedirs(dirpath, exist_ok=True)
 
@@ -453,7 +455,9 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
          collaborative=True,
          num_beams=10, scorer=None,
          dataset_info=None, 
-         with_type=True):
+         with_type=True,
+         start_ent_type=USER,
+         end_ent_type=PRODUCT):
     dirpath = logdir#os.path.join(logdir, 'paths3')
     os.makedirs(dirpath, exist_ok=True)
 
@@ -461,7 +465,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
     u2p_rel_id = LiteralPath.interaction_rel_id
     user_prod_cache = dict()
     unique_path_set = set()    
-    def dfs(uid, prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, cur_hop, path, prev_rel):
+    def dfs(uid, prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, cur_hop, path, prev_rel, n_hop, start_ent_type, end_ent_type):
         if cur_hop >= n_hop:
             path = [ str(x) for x in path]
             #path = [x if isinstance(x,int) else x.item()  for x in path]
@@ -497,7 +501,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                     continue 
                 candidates = kg[cur_ent_t][cur_ent_id][rel][cand_type]
 
-                if cur_hop == n_hop-1:
+                if cur_hop == n_hop-1 and end_ent_type == PROD_ENT:
 
                     if itemset_type == 'inner':
                         if (rel, cand_type) not in user_prod_cache:
@@ -523,19 +527,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                     else:
                         ent_t = EXT_ENT
                     key = uid, rel_id, ent_t, cur_ent_id
-                   #print(key)
-                    # TODO FIX EXTERNAL ENTITY MAPPING
 
-                    #if itemset_type == 'inner' and key in uid_ext_ent_mapping:
-                    #    candidates = uid_ext_ent_mapping[key]
-                    #elif itemset_type == 'outer' and key in uid_outer_ext_ent_mapping:
-                    #    candidates = uid_outer_ext_ent_mapping[key]
-                    #else:
-                    #    continue
-                    #comp = len(user_dict[uid].intersection(set(candidates)))
-                    #assert  comp == len(candidates), f'Error length mismatch, found {comp} but should be {len(candidates)} out of total {len(user_dict[uid]) }\n for uid:{uid}'
-                          
-                    # else the default itemset is used (all  items reachable from current entity, which is not an item at the 'n_hop-1' hop)
                 if len(candidates) == 0:
                     continue         
                 if with_type:    
@@ -558,7 +550,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                         type_prefix = LiteralPath.user_type
 
                     elif cand_type == PROD_ENT:#next_ent_id not in items:
-                        if cur_hop == n_hop-1:
+                        if cur_hop == n_hop-1 and end_ent_type == PROD_ENT:
                             assert next_ent_id in user_dict[uid], f'Error: {next_ent_id} not found for user: {uid} in {user_dict[uid]}' 
                         if next_ent_id in user_dict[uid]:  
                             prefix = LiteralPath.recom_prod
@@ -573,7 +565,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
 
                     path.append(f'{type_prefix}{next_ent_id}')
                     #dfs(prev_ent_t, uid, cur_ent_t, cur_ent_id, cur_hop, path)
-                    if dfs(uid, cur_ent_t, cand_type, cur_ent_id, next_ent_id, cur_hop+1, path, rel_id):#rel):
+                    if dfs(uid, cur_ent_t, cand_type, cur_ent_id, next_ent_id, cur_hop+1, path, rel_id, n_hop, start_ent_type, end_ent_type):
                         if with_type:
                             path.pop()
                         path.pop()
@@ -590,11 +582,79 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                     path.pop()
                 path.pop()
         return False
+
+    non_prod_entities = set([USER_ENT, EXT_ENT])
     user_products = list(user_dict[uid])
     with open(os.path.join(dirpath, f'paths_{uid}.txt' ), 'w') as fp:
             cnt = 0
             
             while cnt < max_paths:
+
+                if start_ent_type is None:
+                    
+                    cur_start_ent_type = random.choice([USER, PRODUCT, ENTITY])
+
+
+                    if cur_start_ent_type == ENTITY:
+                        non_ext_entity = set([USER, PRODUCT])
+                        candidate_ext_ent_types = [x for x in kg if x not in non_ext_entity ]
+                        cur_start_ent_type = random.choice(candidate_ext_ent_types)
+                    
+                    id = random.choice(list(kg[cur_start_ent_type]) ) 
+                else:
+                    cur_start_ent_type = start_ent_type
+                    id = uid
+                if n_hop is None:
+                    valid_hop_range = []
+                    if end_ent_type is  None:
+                        valid_hop_range = [i for i in range(1,50+1)]
+                    else:
+                        
+                        if (cur_start_ent_type in non_prod_entities and end_ent_type not in non_prod_entities) or \
+                                (cur_start_ent_type not in non_prod_entities and end_ent_type in non_prod_entities) :
+                            # only odd hops
+                            valid_hop_range = [i for i in range(1,50+1, 2)]
+                        else:
+                            # only even hops
+                            valid_hop_range = [i for i in range(2,50+1, 2)]
+                         
+                    cur_n_hop = random.choice(valid_hop_range)
+                else:
+                    cur_n_hop = n_hop
+
+                
+
+                path = []
+                cur_hop = 0
+                
+
+                if cur_start_ent_type == USER_ENT:
+                    if id == uid:
+                        prefix = LiteralPath.main_user
+                    else:
+                        prefix = LiteralPath.oth_user
+                    type_prefix = LiteralPath.user_type
+                elif cur_start_ent_type == PROD_ENT:
+                    if id in user_dict[uid]:  
+                        prefix = LiteralPath.recom_prod
+                    else:
+                        prefix = LiteralPath.prod    
+                    type_prefix = LiteralPath.prod_type                  
+                else:              
+                    prefix = LiteralPath.ent
+                    type_prefix = LiteralPath.ent_type
+                if with_type:
+                    path.append(prefix)
+
+                path.append(f'{type_prefix}{id}')     
+
+                prev_ent_t = cur_start_ent_type
+                cur_ent_t = cur_start_ent_type
+
+
+                dfs(uid, cur_start_ent_type, cur_start_ent_type, id, id, cur_hop, path, -100, cur_n_hop, cur_start_ent_type, end_ent_type)
+                cnt += 1
+                '''
                 cur_hop = 1
                 pid = random.choice(user_products)
                 if pid not in kg[PROD_ENT]:
@@ -614,9 +674,10 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                 prev_ent_t = USER_ENT
                 cur_ent_t = PROD_ENT
 
+
                 dfs(uid, prev_ent_t, cur_ent_t, uid, cur_ent_id, cur_hop, path, rel_id)
                 cnt += 1
-    
+                '''    
 
 
 def random_walk_sample_paths_recursive(uid, kg, items, n_hop, KG2T, R2T, PROD_ENT, U2P_REL, logdir, 
@@ -874,7 +935,9 @@ class KGstats:
     def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk',itemset_type='inner', 
         collaborative=True, num_beams=0, scorer=None, embedding_root_dir='./',
         nproc=8,
-        with_type=True):
+        with_type=True,
+        start_ent_type=USER,
+        end_ent_type=PRODUCT):
         user_dict, items = self.user_dict, self.items
         PROD_ENT, U2P_REL =  MAIN_PRODUCT_INTERACTION[self.dataset_name] 
         if scorer is not None:
@@ -900,7 +963,10 @@ class KGstats:
                                 collaborative=collaborative,
                                 num_beams=num_beams,
                                 scorer=scorer,
-                                dataset_info=self.dataset_info)
+                                dataset_info=self.dataset_info,
+                                with_type=with_type,
+                                start_ent_type=start_ent_type,
+                                end_ent_type=end_ent_type)
 
 
         '''
@@ -923,7 +989,9 @@ class KGstats:
                                 num_beams=num_beams,
                                 scorer=scorer,
                                 dataset_info=self.dataset_info,
-                                with_type=with_type)
+                                with_type=with_type,
+                                start_ent_type=start_ent_type,
+                                end_ent_type=end_ent_type)
             ,
                 tqdm([[uid] for uid in self.user_dict ] ))
 
