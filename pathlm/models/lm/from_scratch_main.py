@@ -73,7 +73,6 @@ from tokenizers import (
 
 
 
-#TODO: TEST FORWARD + LOSS
 class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
     SPECIAL_ID = 0
     ENTITY_ID = 1
@@ -253,7 +252,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         
         
         if inputs_embeds is not None:
-            input_embeds += type_embeds
+            inputs_embeds += type_embeds
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -398,27 +397,6 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
-
-
-
-
-#TODO: TEST WITHOUT GROUP TEXTS
-def generate_type_ids(sequence):
-    # Define type ids for special tokens, entities, and relations
-    SPECIAL_ID = 0
-    ENTITY_ID = 1
-    RELATION_ID = 2
-
-    type_ids = []
-    for idx, token_id in enumerate(sequence['input_ids']):
-        if idx == 0 or idx == len(sequence['input_ids']) - 1:
-            type_ids.append(SPECIAL_ID)
-        elif idx % 2 == 1:
-            type_ids.append(ENTITY_ID)
-        elif idx % 2 == 0:
-            type_ids.append(RELATION_ID)
-    sequence['type_ids'] = ' '.join(type_ids)
-    return sequence
 
 
 class CustomTrainer(Trainer):
@@ -596,10 +574,10 @@ class CustomTrainer(Trainer):
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
 
 
-
 # Read an example and return the tokenized version
 def tokenize_function(examples: str, context_length: int=100):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
+
 
 def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace):
     embed_filepath = os.path.join(args.embedding_root_dir, args.dataset, args.emb_filename)
@@ -665,7 +643,6 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     # Training arguments
     custom_name = f"from_scratch-{args.dataset}-{args.model}"
 
-    #TODO: Add to the dataset the type_ids
     #tokenized_dataset.map(generate_type_ids, batched=False, num_proc=args.nproc)
 
     # Training arguments for Causal Language Model task
@@ -706,7 +683,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         n_sequences_per_user=args.n_seq_infer,
         tokenizer=tokenizer,
         eval_device=args.eval_device,
-                model=model,
+        model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["test"],
