@@ -1,3 +1,7 @@
+from pathlm.models.rl.PGPR.pgpr_utils import PRODUCT, USER, ENTITY, RELATION
+
+
+
 class Trie:
     TERMINATION = ''
     class Item:
@@ -37,6 +41,7 @@ class Trie:
             cur_trie = cur_item.trie
         cur_trie[Trie.TERMINATION] = None 
 
+
 class LiteralPath:
 	
     main_user = ''#'Us'
@@ -48,6 +53,10 @@ class LiteralPath:
     prod_type = 'P'
     ent_type = 'E'
     rel_type = 'R'
+
+
+
+
 
 
     recom_prod = ''#'P'#'Ps'
@@ -69,3 +78,10 @@ class LiteralPath:
 
 
 
+class TypeMapper:
+    mapping = { LiteralPath.user_type : USER,
+            LiteralPath.prod_type : PRODUCT,
+            LiteralPath.ent_type : ENTITY,
+            LiteralPath.rel_type : RELATION,  }
+    inv_mapping = { v:k for k,v in mapping.items() }
+    

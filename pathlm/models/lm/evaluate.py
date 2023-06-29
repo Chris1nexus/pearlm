@@ -101,7 +101,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     TOKENIZER_TYPE = "WordLevel"
 
-    SEQUENCE_LEN = 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+    SEQUENCE_LEN =  2*args.n_hop + 1  #14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
     LAST_TOKEN_POS = SEQUENCE_LEN-1
     INFERENCE_BATCH_SIZE = args.infer_batch_size
     N_SEQUENCES_PER_USER = 10
@@ -127,20 +127,21 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
 
     #'''
 
-    init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
+    init_condition_fn = lambda uid: f"U{uid} R-1"
     inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
-    
+
 
     
-    logits_processor = LogitsProcessorList([
-        TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=user_negatives, 
-                    tokenizer=tokenizer, 
-                    total_length=SEQUENCE_LEN,#LAST_TOKEN_POS,
-                    num_return_sequences=N_SEQUENCES_PER_USER,
-                    id_to_uid_token_map=id_to_uid_token_map)#6)
-        #ForceLastTokenLogitsProcessorWordLevel(user_negatives, tokenizer=tokenizer, total_length=LAST_TOKEN_POS)
-        # 7 = 2 input token + 5 generated tokens
-    ])
+    logits_processor =  LogitsProcessorList([
+            TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=user_negatives, 
+                        tokenizer=tokenizer, 
+                        total_length=SEQUENCE_LEN,#LAST_TOKEN_POS,
+                        num_return_sequences=N_SEQUENCES_PER_USER,
+                        id_to_uid_token_map=id_to_uid_token_map,
+                        eos_token_ids=[tokenizer.convert_tokens_to_ids(tokenizer.eos_token)])#6)
+            #ForceLastTokenLogitsProcessorWordLevel(user_negatives, tokenizer=tokenizer, total_length=LAST_TOKEN_POS)
+            # 7 = 2 input token + 5 generated tokens
+        ])
 
     dataset = Dataset.from_dict(inference_paths)
     #print(dataset)
@@ -161,7 +162,7 @@ def generate_topks_withWordLevel(model, uids: List[str], args: argparse.Namespac
         for output_batch in outputs:
                 for output in output_batch:
                     output = output['generated_text'].split(" ")
-                    uid = output[1][1:]
+                    uid = output[0][1:]
 
                     recommended_token = output[-1]
                     recommended_item = recommended_token[1:]

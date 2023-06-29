@@ -45,7 +45,7 @@ from transformers.models.gpt2.configuration_gpt2 import GPT2Config
 
 
 
-from pathlm.models.lm.generation_constraints import TypifiedForceLastTokenLogitsProcessorWordLevel
+from pathlm.models.lm.generation_constraints import TypifiedForceLastTokenLogitsProcessorWordLevel, ConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.evaluate import evaluate
 from pathlm.models.lm.lm_utils import MLM_MODELS
 from pathlm.models.lm.path_dataset import PathDataset
@@ -54,8 +54,8 @@ from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k 
 from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.sampling.container.constants import LiteralPath
-
+from pathlm.sampling.container.constants import LiteralPath, TypeMapper
+from pathlm.models.rl.PGPR.pgpr_utils import PRODUCT, USER, ENTITY, RELATION
 from tokenizers import (
     decoders,
     models,
@@ -73,6 +73,7 @@ from tokenizers import (
 
 
 
+#TODO: TEST FORWARD + LOSS
 class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
     SPECIAL_ID = 0
     ENTITY_ID = 1
@@ -97,6 +98,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         self.even_idx_mask = torch.BoolTensor(idxs)
         
         self.num_kg_types = len(DistilGPT2TwoHeadModel.kg_categories)
+
+        self.id_to_str = config.token_id_to_token
 
         # Create type embedding layer
         self.type_embeddings = torch.nn.Embedding(num_embeddings=self.num_kg_types, embedding_dim=config.n_embd) # for entities, relations, and special tokens
@@ -238,6 +241,12 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             return_dict: Optional[bool] = None,
         ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
 
+        #s = []
+        #for token_id in input_ids[0]:
+        #    s.append( self.id_to_str[token_id.item()] )
+        #print(' '.join(s))
+        #print()
+
         batch_size, seq_len = input_ids.shape
         k = (batch_size, seq_len) 
         if k not in self.type_ids_cache:
@@ -252,7 +261,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         
         
         if inputs_embeds is not None:
-            inputs_embeds += type_embeds
+            input_embeds += type_embeds
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -320,7 +329,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             labels = labels.contiguous()
             lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1).to(logits.device)) 
             return lm_loss  
-        '''         
+        #'''         
         loss = 0.
         # entity pred mask
         logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
@@ -344,7 +353,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #    self.idx_mask_cache[mask_key] = self.__get_even_idx_mask(batch_size, sequence_len-1)
         #idx_mask = self.idx_mask_cache[mask_key].to(lm_entity_logits.device)
 
-        loss += compute_loss(lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask]#lm_entity_logits[:,:-1,:][idx_mask,:],input_ids[:,1:][idx_mask],
+        loss += compute_loss(lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],#lm_entity_logits[:,:-1,:][idx_mask,:],input_ids[:,1:][idx_mask],
                         #lm_entity_logits[:,:-1,:][:,idxs,:],input_ids[:,1:][:,idxs], #lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],
                     self.ent_mask_weight)
 
@@ -364,12 +373,24 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(batch_size)] )
         #print(idx_mask.device)
         #idx_mask = torch.logical_not(self.idx_mask_cache[mask_key].to(lm_entity_logits.device))
-        loss += compute_loss(lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],#lm_relation_logits[:,:-1,:][idx_mask,:], input_ids[:,1:][idx_mask],
+
+
+        LAMBDA = 200.
+        loss += LAMBDA * compute_loss(lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],#lm_relation_logits[:,:-1,:][idx_mask,:], input_ids[:,1:][idx_mask],
                     #lm_relation_logits[:,:-1,:][:,idxs,:], input_ids[:,1:][:,idxs],  #lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],
                     self.rel_mask_weight)
-
+        #print(loss)
         #idxs = [[i%2 == 0 for _ in range(lm_entity_logits.shape[-1]) ]     for i in range(sequence_len) ]
         #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(batch_size)] ).to(lm_entity_logits.device)
+        #'''
+        #out_logits = torch.zeros(lm_entity_logits.shape)
+        #print(lm_entity_logits)
+        for i in range(sequence_len ):
+            if i % 2 == 1:
+                lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
+            #else:
+            #    out_logits[:,i, :] = lm_relation_logits[:,i,:]
+        #print(lm_entity_logits)
         '''
 
         batch_size = input_ids.shape[0]
@@ -385,18 +406,41 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         idx_mask = self.idx_mask_cache[mask_key]
         logits =  torch.where(idx_mask.to(lm_entity_logits.device),lm_entity_logits, lm_relation_logits) 
         loss = compute_loss(logits[:,:-1,:], input_ids[:,1:])
-        if not return_dict:
-            output = (logits,) + transformer_outputs[1:]
-            return ((loss,) + output) if loss is not None else output
+        '''
+
+        #if not return_dict:
+        #    output = (logits,) + transformer_outputs[1:]
+        #    return ((loss,) + output) if loss is not None else output
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
-            logits=logits,#lm_entity_logits,
+            logits=lm_entity_logits,#logits,#lm_entity_logits,
             past_key_values=transformer_outputs.past_key_values,
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
+
+
+
+
+#TODO: TEST WITHOUT GROUP TEXTS
+def generate_type_ids(sequence):
+    # Define type ids for special tokens, entities, and relations
+    SPECIAL_ID = 0
+    ENTITY_ID = 1
+    RELATION_ID = 2
+
+    type_ids = []
+    for idx, token_id in enumerate(sequence['input_ids']):
+        if idx == 0 or idx == len(sequence['input_ids']) - 1:
+            type_ids.append(SPECIAL_ID)
+        elif idx % 2 == 1:
+            type_ids.append(ENTITY_ID)
+        elif idx % 2 == 0:
+            type_ids.append(RELATION_ID)
+    sequence['type_ids'] = ' '.join(type_ids)
+    return sequence
 
 
 class CustomTrainer(Trainer):
@@ -409,6 +453,7 @@ class CustomTrainer(Trainer):
         n_sequences_per_user=10,
         tokenizer=None,
         eval_device='cpu',
+        tokenized_kg=None,
         **kwargs
     ):   
         super().__init__(**kwargs)
@@ -425,9 +470,9 @@ class CustomTrainer(Trainer):
         self.eval_device = eval_device
 
         #self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
-        self.SEQUENCE_LEN =  2 + n_hop+1 + n_hop  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
+        self.SEQUENCE_LEN =  2*n_hop+1 +1  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
 
-        self.LAST_TOKEN_POS = self.SEQUENCE_LEN-1
+        self.LAST_TOKEN_POS = self.SEQUENCE_LEN#-1
         self.INFERENCE_BATCH_SIZE = args.infer_batch_size
         self.N_SEQUENCES_PER_USER = n_sequences_per_user
         print('Sequence length: ',self.SEQUENCE_LEN)
@@ -447,7 +492,7 @@ class CustomTrainer(Trainer):
         self.id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
 
         #'''
-
+        #tokenizer
         #init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
         init_condition_fn = lambda uid: f"U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
@@ -455,11 +500,14 @@ class CustomTrainer(Trainer):
 
         
         self.logits_processor = LogitsProcessorList([
-            TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=self.user_negatives, 
+            
+                ConstrainedLogitsProcessorWordLevel(tokenized_kg=tokenized_kg,
+                        force_token_map=self.user_negatives, 
                         tokenizer=tokenizer, 
                         total_length=self.SEQUENCE_LEN,#LAST_TOKEN_POS,
                         num_return_sequences=self.N_SEQUENCES_PER_USER,
-                        id_to_uid_token_map=self.id_to_uid_token_map)#6)
+                        id_to_uid_token_map=self.id_to_uid_token_map,
+                        eos_token_ids=[self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)])#6)
             #ForceLastTokenLogitsProcessorWordLevel(user_negatives, tokenizer=tokenizer, total_length=LAST_TOKEN_POS)
             # 7 = 2 input token + 5 generated tokens
         ])
@@ -486,6 +534,7 @@ class CustomTrainer(Trainer):
                     for output in output_batch:
                         output = output['generated_text'].split(" ")
                         #uid = output[1][1:]
+                        #print(output)
                         uid = output[0][1:]
                         recommended_token = output[-1]
                         recommended_item = recommended_token[1:]
@@ -574,10 +623,10 @@ class CustomTrainer(Trainer):
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
 
 
-# Read an example and return the tokenized version
-def tokenize_function(examples: str, context_length: int=100):
-    return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
+# Read an example and return the tokenized version
+def tokenize_function(examples: str, context_length: int=200):
+    return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
 def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace):
     embed_filepath = os.path.join(args.embedding_root_dir, args.dataset, args.emb_filename)
@@ -589,20 +638,24 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     ent_mask = []
     rel_mask = []
     class_weight = 1.
+    token_id_to_token = dict()
     for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda x: x[1]):
         if token[0] == LiteralPath.rel_type or not token[0].isalpha():
             rel_mask.append(class_weight)
         else:
             rel_mask.append(0)
-        if token[0] != LiteralPath.rel_type :
+        if token[0] != LiteralPath.rel_type or not token[0].isalpha():
             ent_mask.append(class_weight)
         else:
             ent_mask.append(0)
 
+        token_id_to_token[token_id] = token
+    #print(ent_mask)
+    #print(rel_mask)
     config_kwargs ={        
         'vocab_size':len(tokenizer),
         'n_ctx':context_length,
-        'n_positions': context_length,
+        #'n_positions': context_length,
         'pad_token_id':tokenizer.pad_token_id,
         'bos_token_id':tokenizer.bos_token_id,
         'eos_token_id':tokenizer.eos_token_id,
@@ -623,26 +676,90 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         'train_batch_size':args.batch_size,
         'test_batch_size':args.infer_batch_size,
         'ent_mask': ent_mask,
-        'rel_mask': rel_mask})
+        'rel_mask': rel_mask,
+        'token_id_to_token': token_id_to_token})
 
     # Initializing a model from the configuration
     #model = DistilGPT2TwoHeadModel(config)
-    model = AutoModelForCausalLM.from_config(config)
+    if args.pretrain_ckpt is not None:
+        custom_name = f'clm-from_scratch-{args.dataset}-{args.model}-ckpt/checkpoint-{args.pretrain_ckpt}'
+        model = AutoModelForCausalLM.from_pretrained(custom_name)
+    else:
+        model = AutoModelForCausalLM.from_config(config)
     #model = DistilGPT2TwoHeadModel(config)
-
+    ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
+    # Dataset directories.
+    dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
+    
+    data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
+    kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)  
     if embeds:
-        ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
-        # Dataset directories.
-        dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
-        
-        data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
-        kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)  
-
         mapper = EmbeddingMapper(tokenizer, kg, embeds)      
         mapper.init_with_embedding(model.transformer.wte.weight)
+    
+    def tokenize_augmented_kg(kg,  tokenizer, use_token_ids=False):
+        type_id_to_subtype_mapping = kg.dataset_info.groupwise_global_eid_to_subtype.copy()
+        rel_id2type = kg.rel_id2type.copy()
+        type_id_to_subtype_mapping[RELATION] = {int(k):v for k,v in rel_id2type.items()}        
+
+        aug_kg = kg.aug_kg
+
+        token_id_to_token = dict()
+        kg_to_vocab_mapping = dict()
+        tokenized_kg = dict()
+        
+        for token, token_id in tokenizer.get_vocab().items():
+            if not token[0].isalpha():
+                continue
+                
+            cur_type = token[0]
+            cur_id = int(token[1:])      
+
+            type = TypeMapper.mapping[cur_type]
+            subtype = type_id_to_subtype_mapping[type][cur_id]
+            if cur_type == LiteralPath.rel_type:
+                cur_id = None
+            value = token
+            if use_token_ids:
+                value = token_id
+            kg_to_vocab_mapping[(subtype,cur_id)] = token_id
+        
+        for head_type in aug_kg:
+            for head_id in aug_kg[head_type]:
+                head_key = head_type,head_id
+                if head_key not in kg_to_vocab_mapping:
+                    continue            
+                head_ent_token = kg_to_vocab_mapping[head_key]
+                tokenized_kg[head_ent_token] = dict()
+                
+                for rel in aug_kg[head_type][head_id]:
+                    rel_token = kg_to_vocab_mapping[rel,None]
+                    tokenized_kg[head_ent_token][rel_token] = set()
+                    
+                    for tail_type in aug_kg[head_type][head_id][rel]:
+                        for tail_id in aug_kg[head_type][head_id][rel][tail_type]:
+                            tail_key = tail_type,tail_id
+                            if tail_key not in kg_to_vocab_mapping:
+                                continue
+                            tail_token = kg_to_vocab_mapping[tail_key]
+                            tokenized_kg[head_ent_token][rel_token].add(tail_token)
+                    
+        return tokenized_kg, kg_to_vocab_mapping
+
+    tokenized_kg, _ = tokenize_augmented_kg(kg,  tokenizer, use_token_ids=True)
+    #
+    '''TypifiedForceLastTokenLogitsProcessorWordLevel(force_token_map=self.user_negatives, 
+                        tokenizer=tokenizer, 
+                        total_length=self.SEQUENCE_LEN,#LAST_TOKEN_POS,
+                        num_return_sequences=self.N_SEQUENCES_PER_USER,
+                        id_to_uid_token_map=self.id_to_uid_token_map,
+                        eos_token_ids=[self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)])
+    '''
+
     # Training arguments
     custom_name = f"from_scratch-{args.dataset}-{args.model}"
 
+    #TODO: Add to the dataset the type_ids
     #tokenized_dataset.map(generate_type_ids, batched=False, num_proc=args.nproc)
 
     # Training arguments for Causal Language Model task
@@ -650,7 +767,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         f"clm-{custom_name}",
             evaluation_strategy="steps",
             save_strategy='steps',
-        eval_steps=1000,
+        eval_steps=1,
         learning_rate=5e-5,
         weight_decay=0.01,
         bf16=False,
@@ -661,7 +778,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=1000,  # number of warmup steps for learning rate
-        save_steps=500,
+        save_steps=100,
         save_total_limit=2,
         #load_best_model_at_end=True,
         metric_for_best_model='ndcg',
@@ -678,12 +795,13 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
 
     trainer = CustomTrainer(
         dataset_name=args.dataset,
+        tokenized_kg=tokenized_kg,
         n_hop=args.n_hop,
         infer_batch_size=args.infer_batch_size,
         n_sequences_per_user=args.n_seq_infer,
         tokenizer=tokenizer,
         eval_device=args.eval_device,
-        model=model,
+                model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         eval_dataset=tokenized_dataset["test"],
@@ -734,6 +852,14 @@ def stratified_sampling(dataset, valid_size: float=0.05):
 def add_user_id(example):
     example["user_id"] = example['path'].split(' ')[0]
     return example
+def none_or_str(value):
+    if value == 'None':
+        return None
+    return value
+def none_or_int(value):
+    if value == 'None':
+        return None
+    return int(value)    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -742,7 +868,7 @@ if __name__ == "__main__":
     parser.add_argument("--nproc", type=int, default=2, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=24, help="Train batch size")
     parser.add_argument("--test_batch_size", type=int, default=24, help="Test batch size")
-    parser.add_argument("--context_length", type=int, default=100,
+    parser.add_argument("--context_length", type=int, default=200,
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,
                         help="Number of elements in a predicted sequence (considering only the ids)")    
@@ -756,7 +882,10 @@ if __name__ == "__main__":
     parser.add_argument("--embedding_root_dir", type=str, default="./embedding-weights", help="default: ./embedding-weights")
     parser.add_argument("--emb_filename", type=str, default='transe_embed.pkl', help="default: 'transe_embed.pkl'")
     parser.add_argument("--emb_size", type=int, default=100, help="Transformer Embedding size (must match external embedding size, if chosen)")
-    
+    parser.add_argument("--pretrain_ckpt", type=none_or_int, default=None, help="Checkpoint from which to resume training of the model (default to starting from scratch)")
+
+
+
     args = parser.parse_args()
 
 
@@ -793,7 +922,17 @@ if __name__ == "__main__":
             for elem in paths_dict["path"]:
                 paths_list.append(convert_fn(elem))
                 user_list.append(elem.split(' ')[0])
-            return batch_dict        
+            return batch_dict     
+        def convert_path_and_add_uid(paths_dict, convert_fn):
+            batch_dict = {"path":[], "user_id":[]}
+
+            paths_list = batch_dict['path']
+            user_list = batch_dict['user_id'] 
+
+            for elem in paths_dict["path"]:
+                paths_list.append(convert_fn(elem))
+                user_list.append(elem.split(' ')[0]  )
+            return batch_dict                     
         def convert_typed_path_and_add_uid(paths_dict, convert_fn):
             batch_dict = {"path":[], "user_id":[]}
 
@@ -813,7 +952,7 @@ if __name__ == "__main__":
             #dataset.dataset = dataset.dataset.map(lambda x: {"path": [dataset.keep_numeric(elem) for elem in x["path"]]  },
             #                            batched=True, num_proc=args.nproc)     
         
-        dataset.dataset = dataset.dataset.map(lambda x: convert_typed_path_and_add_uid(x,convert_fn),#convert_and_add_uid(x, convert_fn),
+        dataset.dataset = dataset.dataset.map(lambda x: convert_path_and_add_uid(x,convert_fn),#convert_and_add_uid(x, convert_fn),
                                         batched=True, num_proc=args.nproc)    
         dataset.dataset = dataset.dataset.class_encode_column('user_id')                                            
         dataset.show_random_examples()
