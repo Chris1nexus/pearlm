@@ -662,10 +662,10 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
     }
     if embeds:
         print('Using embeddings: ',args.emb_filename)
-        config_kwargs.update({
-        'hidden_size':args.emb_size,
-        'num_attention_heads':args.emb_size//10
-        })
+    config_kwargs.update({
+    'hidden_size':args.emb_size,
+    'num_attention_heads':args.emb_size//10
+    })
 
     # Initializing the selected model style configuration
     config = AutoConfig.from_pretrained(
