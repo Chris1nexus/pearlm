@@ -472,12 +472,9 @@ class CustomTrainer(Trainer):
         #self.SEQUENCE_LEN =  2 + 2 + n_hop*2 + (n_hop-1)*2  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
         self.SEQUENCE_LEN =  2*n_hop+1 +1  # 14#22#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
 
-        self.LAST_TOKEN_POS = self.SEQUENCE_LEN#-1
         self.INFERENCE_BATCH_SIZE = args.infer_batch_size
         self.N_SEQUENCES_PER_USER = n_sequences_per_user
         print('Sequence length: ',self.SEQUENCE_LEN)
-        print('Last token position: ',self.LAST_TOKEN_POS)
-
 
 
         # Load user negatives
@@ -494,6 +491,7 @@ class CustomTrainer(Trainer):
         #'''
         #tokenizer
         #init_condition_fn = lambda uid: f"Us U{uid} Rf R-1 Ps"
+        #init_condition_fn = lambda uid: f"{self.tokenizer.eos_token} U{uid} R-1"
         init_condition_fn = lambda uid: f"U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids] }
         
@@ -524,6 +522,9 @@ class CustomTrainer(Trainer):
         outputs = self.generator(CustomTrainer.__lazy_load_data(self.test_dataset),#f"Us U{uid} Rf R-1",
                                 max_length=self.SEQUENCE_LEN,#22#15  # 2 + 2 + 5*2 + 4*2       7 = 2 * 2 input token + 5 * 2 generated tokens + 1
                                 num_return_sequences=self.N_SEQUENCES_PER_USER,
+                                #num_beams=self.N_SEQUENCES_PER_USER,
+                                #do_sample=True,
+                                #top_p=0.4,
                                 logits_processor=self.logits_processor,
                                 batch_size=self.INFERENCE_BATCH_SIZE,
         )  
@@ -534,7 +535,7 @@ class CustomTrainer(Trainer):
                     for output in output_batch:
                         output = output['generated_text'].split(" ")
                         #uid = output[1][1:]
-                        #print(output)
+                        print(output)
                         uid = output[0][1:]
                         recommended_token = output[-1]
                         recommended_item = recommended_token[1:]
@@ -575,11 +576,11 @@ class CustomTrainer(Trainer):
         return metrics_
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+        
+        logs: Dict[str, float] = {}
         if self.control.should_log:
             if is_torch_tpu_available():
                 xm.mark_step()
-
-            logs: Dict[str, float] = {}
 
             # all_gather + mean() to get average loss over all processes
             tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
@@ -594,7 +595,7 @@ class CustomTrainer(Trainer):
             self._globalstep_last_logged = self.state.global_step
             self.store_flos()
 
-            self.log(logs)
+            
 
         metrics = None
         if self.control.should_evaluate and self.control.should_save:
@@ -612,6 +613,7 @@ class CustomTrainer(Trainer):
                 metrics = self.evaluate(ignore_keys=ignore_keys_for_eval)
             '''
             metrics = self.evaluate(model.module)
+            logs.update(metrics)
             self._report_to_hp_search(trial, self.state.global_step, metrics)
 
             # Run delayed LR scheduler now that metrics are populated
@@ -621,6 +623,11 @@ class CustomTrainer(Trainer):
         if self.control.should_save:
             self._save_checkpoint(model, trial, metrics=metrics)
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+
+
+        # finish logging results
+        if self.control.should_log:
+            self.log(logs)
 
 
 
@@ -660,6 +667,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         'bos_token_id':tokenizer.bos_token_id,
         'eos_token_id':tokenizer.eos_token_id,
     }
+
     if embeds:
         print('Using embeddings: ',args.emb_filename)
     config_kwargs.update({
@@ -672,6 +680,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         model_name,
         **config_kwargs
     )
+    print('Model config: ', config)
     config.update({        'num_hops': args.n_hop,
         'train_batch_size':args.batch_size,
         'test_batch_size':args.infer_batch_size,
@@ -761,13 +770,14 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
 
     #TODO: Add to the dataset the type_ids
     #tokenized_dataset.map(generate_type_ids, batched=False, num_proc=args.nproc)
-
+    STEP_INTERVAL=100
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         f"clm-{custom_name}",
             evaluation_strategy="steps",
             save_strategy='steps',
-        eval_steps=1,
+        eval_steps=STEP_INTERVAL,
+        logging_steps=STEP_INTERVAL,
         learning_rate=5e-5,
         weight_decay=0.01,
         bf16=False,
@@ -778,7 +788,7 @@ def train_from_scratch(model_name: str, tokenizer, tokenized_dataset, context_le
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=1000,  # number of warmup steps for learning rate
-        save_steps=100,
+        save_steps=STEP_INTERVAL,
         save_total_limit=2,
         #load_best_model_at_end=True,
         metric_for_best_model='ndcg',

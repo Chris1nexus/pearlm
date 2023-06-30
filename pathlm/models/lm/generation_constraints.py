@@ -47,6 +47,9 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
         self.id_to_uid_token_map = id_to_uid_token_map
         self.call_counter_to_process_finished_sequence = 0
         self.eos_token_ids = eos_token_ids
+        self.vocab_tokens = [ i for i in range(len(self.tokenizer.get_vocab()) )]
+        self.cache = dict()
+        self.mask_cache = dict()
 
     def __call__(self, input_ids, scores):
         #print(input_ids)
@@ -66,7 +69,7 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
                 scores[:, i] = 1.             
         else:
 
-
+            mask_list = []
             for idx in range(scores.shape[0]):
                 #cond = idx == -1
                 #if cond:
@@ -75,27 +78,42 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
                 #    print(self.__decode(input_ids[idx]), scores[idx].max())
 
                 if cur_len % 2 == 0:
-                    candidate_tokens = list(self.kg[input_ids[idx,-2].item()][input_ids[idx,-1].item()])
+                    # parse ent->rel    -----> candidates  
+                    k1 = input_ids[idx,-2].item()
+                    k2 = input_ids[idx,-1].item()
+                    key = k1,k2
+                    if key not in self.cache:
+                        self.cache[key] = list(self.kg[k1][k2])
                 else:
+                    # parse ent -----> candidate relations
                     #if cond and input_ids[idx,-1].item() not in self.kg:
                     #    print(self.__decode(input_ids[idx]),  self.kg[input_ids[idx,-3].item()][input_ids[idx,-2].item()]  )
-                    candidate_tokens = list(self.kg[input_ids[idx,-1].item()].keys())
+                    #candidate_tokens = list(self.kg[input_ids[idx,-1].item()].keys())
+                    k1 = input_ids[idx,-1].item()
+                    key = k1
+                    if key not in self.cache:
+                        self.cache[key] = list(self.kg[k1].keys())
+                candidate_tokens = self.cache[key]
+                    
                 #if  cond:
                 #    print(cur_len, candidate_tokens)
                 #    #print()
-
-                mask = np.isin(range(scores.shape[-1]), candidate_tokens)
+                if key not in self.mask_cache:
+                    self.mask_cache[key] = np.isin(self.vocab_tokens, candidate_tokens) 
+                mask = self.mask_cache[key]
+                mask_list.append(mask)
                 #used_mask = np.isin(range(scores.shape[-1]), self.used_tokens)
                 #print(used_mask.sum(), used_mask.shape)
                 #mask = mask & ~used_mask  # Remove already used tokens from the mask
                 # Set to the smallest representable number
-                scores[idx, ~mask] = min_score#float("-Inf")
+                #scores[idx, ~mask] = min_score#float("-Inf")
                 #if cond:
                 #    print(mask, mask.any(),scores.shape[-1], candidate_tokens)
                 #    print(~mask)
                 #    print(scores[idx][:20])
                 #    print(torch.argmax(scores[idx]), torch.max(scores[idx]))
-
+            mask = np.vstack(mask_list)
+            scores[~mask] = min_score
         '''
         BLOCK = True
 
