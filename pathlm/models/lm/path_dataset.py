@@ -7,12 +7,13 @@ import pandas as pd
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 
 class PathDataset:
-    def __init__(self, dataset_name: str, base_data_dir: str="", plain_text_path=False):
+    def __init__(self, dataset_name: str, base_data_dir: str="", task: str=None, plain_text_path=False):
         self.dataset_name = dataset_name
         self.base_data_dir = base_data_dir
         self.data_dir = join(self.base_data_dir, "paths_random_walk")
-        self.read_single_csv_to_hf_dataset()
+        self.task = task
 
+        self.read_single_csv_to_hf_dataset()
         # Get eid2name and rid2name
         self.eid2name = get_eid_to_name_map(self.base_data_dir)
         self.rid2name = get_rid_to_name_map(self.base_data_dir)
@@ -86,13 +87,13 @@ class PathDataset:
     def read_single_csv_to_hf_dataset(self):
         file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
 
-        df_list = []
         for filename in file_list:
-            df_list.append(self.read_csv_as_dataframe(filename))
+            if filename == f'paths_{self.task}.txt':
+                df = self.read_csv_as_dataframe(filename)
+                self.dataset = Dataset.from_pandas(df)
+                continue
 
-        combined_df = pd.concat(df_list, ignore_index=True)
-        # Convert to HuggingFace Dataset
-        self.dataset = Dataset.from_pandas(combined_df)
+
 
     def show_random_examples(self):
         print(self.dataset["path"][:10])
