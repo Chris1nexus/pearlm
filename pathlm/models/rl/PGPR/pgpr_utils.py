@@ -119,6 +119,7 @@ LABELS = {
 USER = 'user'
 PRODUCT = 'product'
 ENTITY = 'entity'
+RELATION = 'relation'
 INTERACTION = {
     ML1M: "watched",
     LFM1M: "listened",
