@@ -7,11 +7,13 @@ import pandas as pd
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 
 class PathDataset:
-    def __init__(self, dataset_name: str, base_data_dir: str="", task: str=None, plain_text_path=False):
+    def __init__(self, dataset_name: str, base_data_dir: str="", task: str=None, sample_size: str=None, n_hop: str=None, plain_text_path=False):
         self.dataset_name = dataset_name
         self.base_data_dir = base_data_dir
         self.data_dir = join(self.base_data_dir, "paths_random_walk")
         self.task = task
+        self.sample_size = sample_size
+        self.n_hop = n_hop
 
         self.read_single_csv_to_hf_dataset()
         # Get eid2name and rid2name
@@ -85,13 +87,22 @@ class PathDataset:
         self.dataset = Dataset.from_pandas(combined_df)
 
     def read_single_csv_to_hf_dataset(self):
-        file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
+        #file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
+        #filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
+        filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
+        #filepath = join(self.data_dir, filename)
 
-        for filename in file_list:
-            if filename == f'paths_{self.task}.txt':
-                df = self.read_csv_as_dataframe(filename)
-                self.dataset = Dataset.from_pandas(df)
-                continue
+
+        df = self.read_csv_as_dataframe(filename)
+        self.dataset = Dataset.from_pandas(df)
+        
+        #for filename in file_list:
+        #    print(filename)
+        #    if filename == f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt':#
+        #
+        #        df = self.read_csv_as_dataframe(filename)
+        #        self.dataset = Dataset.from_pandas(df)
+        #        continue
 
 
 
