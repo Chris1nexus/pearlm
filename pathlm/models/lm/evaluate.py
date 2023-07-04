@@ -13,9 +13,7 @@ import numpy as np
 
 from transformers import AutoTokenizer, set_seed, pipeline, PreTrainedTokenizerFast, PhrasalConstraint
 from datasets import Dataset
-from pathlm.models.lm.generation_constraints import ForceLastTokenLogitsProcessorWordLevel, \
-    ForceTokenAtWordPositionLogitsProcessorBPE, \
-    TypifiedForceLastTokenLogitsProcessorWordLevel
+from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir,SEED

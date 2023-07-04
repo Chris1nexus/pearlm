@@ -14,17 +14,14 @@ from tokenizers import (
     pre_tokenizers,
     processors,
     trainers,
-    Tokenizer,
-)
+    Tokenizer)
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, TrainingArguments, Trainer, \
-    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, LogitsProcessorList, \
+from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
+    DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, LogitsProcessorList,\
     set_seed, GPT2LMHeadModel, GPT2Model, EarlyStoppingCallback
-from transformers.modeling_outputs import (
-    CausalLMOutputWithCrossAttentions,
-)
+from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.utils import is_torch_tpu_available
 
 from pathlm.models.lm.evaluate import evaluate
@@ -133,6 +130,309 @@ def get_user_negatives(dataset_name: str) -> Dict[str, List[str]]:
     for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
         uid_negatives[uid] = list(set(ikg_ids - set(train_set[uid]) - set(valid_set[uid])) - NOT_IN_TOKENIZER)
     return uid_negatives
+
+
+
+
+
+
+#TODO: TEST FORWARD + LOSS
+class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
+    SPECIAL_ID = 0
+    ENTITY_ID = 1
+    RELATION_ID = 2
+    kg_categories = [SPECIAL_ID, ENTITY_ID, RELATION_ID] 
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.config = config
+        self.num_labels = config.vocab_size
+
+        self.ent_mask = config.ent_mask
+        self.rel_mask = config.rel_mask
+        self.ent_mask_weight = torch.FloatTensor(self.ent_mask)
+        self.rel_mask_weight = torch.FloatTensor(self.rel_mask)      
+        self.ent_mask = torch.LongTensor(self.ent_mask)
+        self.rel_mask = torch.LongTensor(self.rel_mask)      
+        self.context_length = config.n_ctx
+
+        idxs = [i%2 == 0 for i in range(self.context_length)  ]
+        #idx_mask = torch.stack( [torch.BoolTensor(idxs) for _ in range(self.context_length)] )
+        self.even_idx_mask = torch.BoolTensor(idxs)
+        
+        self.num_kg_types = len(DistilGPT2TwoHeadModel.kg_categories)
+
+        self.id_to_str = config.token_id_to_token
+
+        # Create type embedding layer
+        self.type_embeddings = torch.nn.Embedding(num_embeddings=self.num_kg_types, embedding_dim=config.n_embd) # for entities, relations, and special tokens
+
+        #self.train_type_ids, self.train_type_embeds = self.__init_type_embeddings(self.config.train_batch_size, seq_len)
+        #self.test_type_ids, self.test_type_embeds = self.__init_type_embeddings(self.config.test_batch_size, seq_len)
+        self.type_ids_cache = dict()
+        self.type_embeds_cache = dict()
+        self.idx_mask_cache = dict()
+
+        self.type_ids_row, self.type_embeds_row = self.__init_type_embeddings(1, self.context_length)
+
+        # Create an additional linear layer for the second prediction head
+        self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
+        self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
+
+
+    def __init_type_embeddings(self,  batch_size, num_hops):
+        #num_hops = self.config.num_hops
+        n_tokens = num_hops#num_hops + 1 + num_hops + 2
+        type_ids = torch.ones((batch_size,n_tokens) , dtype=torch.long)
+
+
+        for i in range(n_tokens):
+            if i == 0 or i == n_tokens-1:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.SPECIAL_ID
+            elif i % 2 == 1:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.ENTITY_ID
+            elif i % 2 == 0:
+                type_ids[:,i] = DistilGPT2TwoHeadModel.RELATION_ID
+        type_ids = type_ids.to(self.type_embeddings.weight.device)
+        type_embeds = self.type_embeddings(type_ids)
+        return type_ids, type_embeds
+
+    def __get_type_embeds(self, n_rows, n_cols):
+        row = self.type_ids_row[:,:(n_cols-1)]
+        row = torch.hstack( [row, torch.ones((1,1))*  DistilGPT2TwoHeadModel.SPECIAL_ID  ] )
+        type_ids = torch.vstack([row for _ in range(n_rows)]) 
+        return type_ids, self.type_embeddings(type_ids.to(self.type_embeddings.weight.device))
+    def __get_even_idx_mask(self,n_rows, n_cols):
+        mask_key = (n_rows,n_cols)
+        cur_mask = self.even_idx_mask[:(n_cols) ]            
+        return torch.vstack([cur_mask for _ in range(n_rows) ] )
+    def parallelize(self, device_map=None):
+        warnings.warn(
+            "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
+            " your model with `device_map='balanced'` in the call to `from_pretrained`. You can also provide your own"
+            " `device_map` but it needs to be a dictionary module_name to device, so for instance {'transformer.h.0':"
+            " 0, 'transformer.h.1': 1, ...}",
+            FutureWarning,
+        )
+        self.device_map = (
+            get_device_map(len(self.transformer.h), range(torch.cuda.device_count()))
+            if device_map is None
+            else device_map
+        )
+        assert_device_map(self.device_map, len(self.transformer.h))
+
+        self.transformer.parallelize(self.device_map)
+        self.type_embeddings = self.type_embeddings.to(self.transformer.first_device)
+        self.lm_entity_head = self.lm_entity_head.to(self.transformer.first_device)
+        self.lm_relation_head = self.lm_relation_head.to(self.transformer.first_device)
+        self.model_parallel = True
+
+    def deparallelize(self):
+        warnings.warn(
+            "Like `parallelize`, `deparallelize` is deprecated and will be removed in v5 of Transformers.",
+            FutureWarning,
+        )
+        self.transformer.deparallelize()
+        self.type_embeddings = self.type_embeddings.to("cpu")
+        self.transformer = self.transformer.to("cpu")
+        self.lm_entity_head = self.lm_entity_head.to("cpu")
+        self.lm_relation_head = self.lm_relation_head.to("cpu")
+        self.model_parallel = False
+        torch.cuda.empty_cache()
+
+    #def get_output_embeddings(self):
+    #    return self.lm_entity_head
+
+    #def set_output_embeddings(self, new_embeddings):
+    #    self.lm_entity_head = new_embeddings
+
+    def prepare_inputs_for_generation(self, input_ids, past_key_values=None, inputs_embeds=None, **kwargs):
+        token_type_ids = kwargs.get("token_type_ids", None)
+        # only last token for inputs_ids if past is defined in kwargs
+        if past_key_values:
+            input_ids = input_ids[:, -1].unsqueeze(-1)
+            if token_type_ids is not None:
+                token_type_ids = token_type_ids[:, -1].unsqueeze(-1)
+
+        attention_mask = kwargs.get("attention_mask", None)
+        position_ids = kwargs.get("position_ids", None)
+
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -1].unsqueeze(-1)
+        else:
+            position_ids = None
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "past_key_values": past_key_values,
+                "use_cache": kwargs.get("use_cache"),
+                "position_ids": position_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+            }
+        )
+        return model_inputs
+
+
+
+
+    def forward(
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            past_key_values: Optional[Tuple[Tuple[torch.Tensor]]] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            encoder_hidden_states: Optional[torch.Tensor] = None,
+            encoder_attention_mask: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            use_cache: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+        ) -> Union[Tuple, CausalLMOutputWithCrossAttentions]:
+
+        #s = []
+        #for token_id in input_ids[0]:
+        #    s.append( self.id_to_str[token_id.item()] )
+        #print(' '.join(s))
+        #print()
+
+        batch_size, seq_len = input_ids.shape
+        k = (batch_size, seq_len) 
+        if k not in self.type_ids_cache:
+            type_ids, type_embeds = self.__init_type_embeddings(batch_size, seq_len)
+
+            self.type_ids_cache[k], self.type_embeds_cache[k] = type_ids, type_embeds
+        
+        type_ids, type_embeds = self.type_ids_cache[k], self.type_embeds_cache[k]
+        #if self.model_parallel:
+        #    torch.cuda.set_device(inputs_embeds.device)
+        #    type_embeds = type_embeds.to(inputs_embeds.device)
+        
+        
+        if inputs_embeds is not None:
+            input_embeds += type_embeds
+
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        transformer_outputs = self.transformer(
+            input_ids,
+            past_key_values=past_key_values,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+        )
+
+
+        hidden_states = transformer_outputs[0]
+        # Set device for model parallelism
+        if self.model_parallel:
+            torch.cuda.set_device(self.transformer.first_device)
+            hidden_states = hidden_states.to(self.lm_entity_head.weight.device)
+
+
+        # Get indexes of type embeddings
+        #entity_token_ids = types_ids == DistilGPT2TwoHeadModel.ENTITY_ID
+        #relation_token_ids = types_ids == DistilGPT2TwoHeadModel.RELATION_ID
+
+        # Get logits from the two heads, first based on entity tokens, then on relation tokens
+        lm_entity_logits = self.lm_entity_head(hidden_states)#[entity_token_ids])
+        lm_relation_logits = self.lm_relation_head(hidden_states)#[relation_token_ids])
+
+
+
+
+
+        '''
+        
+        start,E,R,E,R,E,R,E,end
+
+        start,E,R,E,R,E,end
+
+        start,E,R,E,R,E
+        E,R,E,R,E,end
+
+        # ent
+        start,R,R,end
+        start,E,E,E,end  #(slice)
+        start,R,R,end     # [:(-1)]
+        E,E,E,end  #(slice) [1:-1]   labels       
+
+        # rel
+        start,E,E,E,end   #(slice) [1:-1]  preds 
+        start,R,R,end      #(slice)[1:]   labels
+        '''
+
+        def compute_loss(logits, labels, class_mask=None):
+            if class_mask is not None:
+                class_mask = class_mask.to(logits.device)
+            loss_fct = CrossEntropyLoss(weight=class_mask)
+            logits = logits.contiguous()
+            labels = labels.contiguous()
+            lm_loss = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1).to(logits.device)) 
+            return lm_loss  
+        #'''         
+        loss = 0.
+        # entity pred mask
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:, 1:(-1)]#.unsqueeze(-1)
+        
+
+
+        batch_size = input_ids.shape[0]
+        sequence_len = input_ids.shape[-1]
+        
+
+        loss += compute_loss(lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],#lm_entity_logits[:,:-1,:][idx_mask,:],input_ids[:,1:][idx_mask],
+                        #lm_entity_logits[:,:-1,:][:,idxs,:],input_ids[:,1:][:,idxs], #lm_entity_logits[:,:(-1),:][logits_mask], input_ids[:,1:(-1)][label_mask],
+                    self.ent_mask_weight)
+
+
+        # relation pred mask
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:,1:(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:,1:]#.unsqueeze(-1)
+        
+
+        loss += compute_loss(lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],#lm_relation_logits[:,:-1,:][idx_mask,:], input_ids[:,1:][idx_mask],
+                    #lm_relation_logits[:,:-1,:][:,idxs,:], input_ids[:,1:][:,idxs],  #lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],
+                    self.rel_mask_weight)
+
+        for i in range(sequence_len ):
+            if i % 2 == 1:
+                lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
+
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=loss,
+            logits=lm_entity_logits,#logits,#lm_entity_logits,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+            cross_attentions=transformer_outputs.cross_attentions,
+        )
+
+
 
 
 class DistilGPT2Pos(GPT2LMHeadModel):
@@ -263,6 +563,8 @@ class DistilGPT2Pos(GPT2LMHeadModel):
         )
 
 
+
+
 class CustomTrainer(Trainer):
 
     def __init__(
@@ -274,6 +576,7 @@ class CustomTrainer(Trainer):
             tokenizer=None,
             eval_device='cpu',
             tokenized_kg=None,
+            experiment_name=None,
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -282,6 +585,7 @@ class CustomTrainer(Trainer):
         model = kwargs['model']
         self.tokenizer = tokenizer
         self.dataset_name = dataset_name
+        self.experiment_name = experiment_name
         self.custom_model_name = model.name_or_path.split("/")[-1]
         self.test_set = get_set(dataset_name, set_str='test')
         uids = list(self.test_set.keys())
@@ -317,6 +621,8 @@ class CustomTrainer(Trainer):
         self.test_dataset = Dataset.from_dict(self.inference_paths)
 
     def __generate_topks_withWordLevel(self, model):
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
         batch_size = self.INFERENCE_BATCH_SIZE
         topk = defaultdict(list)
         with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)) as pbar:
@@ -389,8 +695,10 @@ class CustomTrainer(Trainer):
         # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
 
         topks = self.__generate_topks_withWordLevel(model)
-        check_dir(f"./results/{self.dataset_name}/{self.custom_model_name}")
-        pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.custom_model_name}/topks.pkl", "wb"))
+        #check_dir(f"./results/{self.dataset_name}/{self.custom_model_name}")
+        #pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.custom_model_name}/topks.pkl", "wb"))
+        check_dir(f"./results/{self.dataset_name}/{self.experiment_name}")
+        pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))        
         metrics = {"ndcg": [], "mmr": [], }
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
@@ -448,8 +756,6 @@ class CustomTrainer(Trainer):
         # finish logging results
         if self.control.should_log:
             self.log(logs)
-
-
 # Read an example and return the tokenized version
 def tokenize_function(examples: str, context_length: int = 200):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
@@ -466,10 +772,10 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
         'eos_token_id': tokenizer.eos_token_id,
     }
 
-    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}/checkpoint-{args.pretrain_ckpt}'
+    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}'
     # Initializing the selected model style configuration
     config = AutoConfig.from_pretrained(
-        f'clm-pretrain-ml1m-{args.model}-{args.sample_size_pretrain}/checkpoint-{args.pretrain_ckpt}',
+        f'clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}',
         **config_kwargs
     )
 
@@ -477,6 +783,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     config.update({'num_hops': args.n_hop,
                    'sample_size_pretrain': args.sample_size_pretrain,
                    'sample_size_finetune': args.sample_size_finetune,
+                   'sample_size_hop': args.sample_size_hop,
                    'task': args.task,
                    'train_batch_size': args.batch_size,
                    'test_batch_size': args.infer_batch_size,
@@ -501,7 +808,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}"
 
     STEP_INTERVAL = 50
     EVAL_STEP_INTERVAL = 1000
@@ -525,7 +832,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
         warmup_steps=250,  # number of warmup steps for learning rate
         save_steps=EVAL_STEP_INTERVAL,
         save_total_limit=2,
-        # load_best_model_at_end=True,
+        load_best_model_at_end=True,
         metric_for_best_model='ndcg',
         greater_is_better=True,
         seed=SEED,
@@ -545,6 +852,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
+        experiment_name=custom_name,
         data_collator=data_collator)
 
     # Train model
@@ -570,7 +878,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
     # Initializing a model from the configuration
     if args.continue_training and args.pretrain_ckpt is not None:
-        pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_finetune}/checkpoint-{args.pretrain_ckpt}'
+        pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}'
         config = AutoConfig.from_pretrained(
             pretrain_model,
             **config_kwargs
@@ -581,22 +889,34 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         print(model.config)
     else:
         print('TRAINING NEW MODEL')
-        config = AutoConfig.from_pretrained(
-            model_name,
-            **config_kwargs
-        )
-        model = DistilGPT2Pos(config)
+        if 'plm-rec' in model_name:
+            model_class, model_subname = model_name.split('@')
+            config = AutoConfig.from_pretrained(
+                model_class,
+                **config_kwargs
+            )
 
+            model_cls = DistilGPT2TwoHeadModel#(config)
+        else:
+            config = AutoConfig.from_pretrained(
+                model_name,
+                **config_kwargs
+            )
+
+            model_cls = DistilGPT2Pos#(config)
     print('Model config: ', config)
     config.update({'num_hops': args.n_hop,
                    'sample_size_pretrain': args.sample_size_pretrain,
                    'sample_size_finetune': args.sample_size_finetune,
+                   'sample_size_hop': args.sample_size_hop,
                    'task': args.task,
                    'train_batch_size': args.batch_size,
                    'test_batch_size': args.infer_batch_size,
                    'ent_mask': ent_mask,
                    'rel_mask': rel_mask,
                    'token_id_to_token': token_id_to_token})
+
+    model = model_cls(config)
 
     # model = DistilGPT2TwoHeadModel(config)
     ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
@@ -609,13 +929,13 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}"
 
     STEP_INTERVAL = 100
     EVAL_STEP_INTERVAL = 500
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
-        f"clm-{custom_name}-{args.sample_size_finetune}",
+        f"clm-{custom_name}",
         evaluation_strategy="steps",
         save_strategy='steps',
         eval_steps=EVAL_STEP_INTERVAL,
@@ -632,7 +952,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         warmup_steps=250,  # number of warmup steps for learning rate
         save_steps=EVAL_STEP_INTERVAL,
         save_total_limit=2,
-        # load_best_model_at_end=True,
+        load_best_model_at_end=True,
         metric_for_best_model='ndcg',
         greater_is_better=True,
         seed=SEED,
@@ -652,6 +972,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
+        experiment_name=custom_name,
         data_collator=data_collator)
 
     # Train model
@@ -676,7 +997,7 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
         'eos_token_id': tokenizer.eos_token_id,
     }
 
-    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}/checkpoint-{args.pretrain_ckpt}'
+    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}'
     config = AutoConfig.from_pretrained(
         pretrain_model,
         **config_kwargs
@@ -715,6 +1036,7 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
     config.update({'num_hops': args.n_hop,
                    'sample_size_pretrain': args.sample_size_pretrain,
                    'sample_size_finetune': args.sample_size_finetune,
+                   'sample_size_hop': args.sample_size_hop,
                    'task': args.task,
                    'train_batch_size': args.batch_size,
                    'test_batch_size': args.infer_batch_size,
@@ -725,7 +1047,7 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}"
 
     STEP_INTERVAL = 100
     EVAL_STEP_INTERVAL = 1000
@@ -791,7 +1113,8 @@ if __name__ == "__main__":
                         help="Which sample size dataset to use for pretraining")
     parser.add_argument("--sample_size_finetune", type=str, default="500",
                         help="Which sample size dataset to use for fine-tuning/end-to-end")
-
+    parser.add_argument("--sample_size_hop", type=str, default="3",
+                        help="Which number of hops dataset to use for fine-tuning/end-to-end")
     # Model arguments
     parser.add_argument("--model", type=str, default="gpt2-large",
                         help="Model to use from HuggingFace pretrained models")
@@ -802,7 +1125,7 @@ if __name__ == "__main__":
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,
                         help="Number of elements in a predicted sequence (considering only the ids)")
-    parser.add_argument("--load_data", type=bool, default=True, help="")
+    parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--eval_ckpt_iter", type=int, default='1', help="")
@@ -835,6 +1158,7 @@ if __name__ == "__main__":
     tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
 
     sample_size = args.sample_size_pretrain if args.task == 'pretrain' else args.sample_size_finetune
+    dataset_hop_size = args.sample_size_hop
 
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data:
@@ -842,7 +1166,7 @@ if __name__ == "__main__":
         if task == 'end-to-end':  # They share the same dataset
             task = 'finetune'
         tokenized_dataset = load_from_disk(
-            f"data/{dataset_name}/{TOKENIZER_TYPE}/{task}_{sample_size}_tokenized_dataset.hf")
+            f"data/{dataset_name}/{TOKENIZER_TYPE}/{task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
         tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
                                             eos_token="[EOS]", bos_token="[BOS]",
                                             pad_token="[PAD]", unk_token="[UNK]",
@@ -853,7 +1177,7 @@ if __name__ == "__main__":
         plain_text_path = True
 
         print("Loading and processing path sequences...")
-        dataset = PathDataset(dataset_name, data_dir, task=args.task, sample_size=sample_size,
+        dataset = PathDataset(dataset_name, data_dir, task=args.task, sample_size=sample_size, n_hop=dataset_hop_size,
                               plain_text_path=plain_text_path)
 
         dataset.show_random_examples()
@@ -907,15 +1231,15 @@ if __name__ == "__main__":
             })
 
         # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
-        check_dir(f"{data_dir}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_tokenized_dataset.hf")
+        check_dir(f"{data_dir}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
         tokenized_dataset.save_to_disk(
-            f"data/{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_tokenized_dataset.hf")
+            f"data/{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
 
     # Train the model
     if args.load_model: #ENSURE IS WORKING
         # Training arguments
         curr_sample_size = args.sample_size_pretrain if args.task == 'pretrain' else args.sample_size_finetune
-        custom_name = f'clm-{args.task}-{args.dataset}-{args.model}-{curr_sample_size}/checkpoint-{args.eval_ckpt_iter}'  # f"clm-from_scratch-{args.dataset}-{args.model}"
+        custom_name = f'clm-{args.task}-{args.dataset}-{args.model}-{curr_sample_size}-{args.sample_size_hop}/checkpoint-{args.eval_ckpt_iter}'  # f"clm-from_scratch-{args.dataset}-{args.model}"
         model = AutoModelForCausalLM.from_pretrained(
             custom_name)  # f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:
@@ -926,4 +1250,4 @@ if __name__ == "__main__":
         elif args.task == "end-to-end":
             model = train_end_to_end(model_name, tokenizer, tokenized_dataset, args.context_length, args)
 
-    evaluate(model, args)
+    #evaluate(model, args)

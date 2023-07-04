@@ -42,8 +42,8 @@ if __name__ == '__main__':
         LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed',
         CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed'
     }
-    dataset_name = 'ml1m'
-    args.dataset = dataset_name
+    dataset_name = args.dataset#'ml1m'
+    #args.dataset = dataset_name
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     #print(dirpath)
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')   
@@ -60,7 +60,10 @@ if __name__ == '__main__':
     print('Collaborative filtering: ',args.collaborative)
 
 
-    LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}__collaborative_{COLLABORATIVE}__start_type_{args.start_type}__end_type_{args.end_type}__typified_{args.with_type}'
+    #LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}__collaborative_{COLLABORATIVE}__start_type_{args.start_type}__end_type_{args.end_type}__typified_{args.with_type}'
+    LOGDIR = f'dataset_{args.dataset}__hops_{MAX_HOP}__npaths_{N_PATHS}'
+    
+
     #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
     embedding_root_dir='../embedding-weights'
     scorer=TransEScorer(dataset_name, embedding_root_dir)
@@ -73,12 +76,17 @@ if __name__ == '__main__':
         with_type=WITH_TYPE,
         start_ent_type=args.start_type,
         end_ent_type=args.end_type)
+
+
+    '''
     dataset_name = 'lfm1m'
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     args.dataset = dataset_name
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')   
     lfm1m_kg = KGstats(args, args.dataset, dirpath,  data_dir=data_dir_mapping)
     scorer=TransEScorer(dataset_name, embedding_root_dir)
+
+    LOGDIR = f'dataset_{args.dataset}__hops_{MAX_HOP}__npaths_{N_PATHS}'
     lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
         collaborative=COLLABORATIVE,
         nproc=NPROC,
@@ -88,7 +96,7 @@ if __name__ == '__main__':
         with_type=WITH_TYPE,
         start_ent_type=args.start_type,
         end_ent_type=args.end_type        )
-
+    '''
     #ml1m_kg.compute_metapath_frequencies()
     #lfm1m_kg.compute_metapath_frequencies()    
 
