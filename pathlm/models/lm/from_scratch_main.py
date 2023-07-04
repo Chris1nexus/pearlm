@@ -396,8 +396,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #'''         
         loss = 0.
         # entity pred mask
-        logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
-        label_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:, 1:(-1)]#.unsqueeze(-1)
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:, :(-1)].to(lm_entity_logits.device)#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:, 1:(-1)].to(lm_entity_logits.device)#.unsqueeze(-1)
         
 
 
@@ -411,8 +411,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
 
 
         # relation pred mask
-        logits_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:,1:(-1)]#.unsqueeze(-1).expand(self.type_embeds.size())  
-        label_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:,1:]#.unsqueeze(-1)
+        logits_mask = (type_ids != DistilGPT2TwoHeadModel.RELATION_ID)[:,1:(-1)].to(lm_entity_logits.device)#.unsqueeze(-1).expand(self.type_embeds.size())  
+        label_mask = (type_ids != DistilGPT2TwoHeadModel.ENTITY_ID)[:,1:].to(lm_entity_logits.device)#.unsqueeze(-1)
         
 
         loss += compute_loss(lm_relation_logits[:,1:(-1),:][logits_mask], input_ids[:,1:][label_mask],#lm_relation_logits[:,:-1,:][idx_mask,:], input_ids[:,1:][idx_mask],
