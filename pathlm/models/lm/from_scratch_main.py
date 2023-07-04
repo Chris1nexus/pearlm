@@ -708,6 +708,8 @@ class CustomTrainer(Trainer):
                     hits.append(1)
                 else:
                     hits.append(0)
+            while len(hits) < 10:
+                hits.append(0) 
             ndcg = ndcg_at_k(hits, len(hits))
             mmr = mmr_at_k(hits, len(hits))
             metrics["ndcg"].append(ndcg)
