@@ -1,3 +1,4 @@
+NPROC=6
 for MODEL in distilgpt2@plm-rec gpt2-medium@plm-rec gpt2-large@plm-rec ;
 	do
 	for HOPS in 3 5 ;

@@ -1,4 +1,4 @@
-
+NPROC=6
 for MODEL in distilgpt2 gpt2-medium gpt2-large ;
 	do
 	for HOPS in 3 5 ;
