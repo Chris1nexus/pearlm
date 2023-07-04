@@ -180,6 +180,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
 
 
+
     def __init_type_embeddings(self,  batch_size, num_hops):
         #num_hops = self.config.num_hops
         n_tokens = num_hops#num_hops + 1 + num_hops + 2
@@ -875,6 +876,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         'bos_token_id': tokenizer.bos_token_id,
         'eos_token_id': tokenizer.eos_token_id,
     }
+    embeds=None
 
     # Initializing a model from the configuration
     if args.continue_training and args.pretrain_ckpt is not None:
@@ -891,6 +893,19 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         print('TRAINING NEW MODEL')
         if 'plm-rec' in model_name:
             model_class, model_subname = model_name.split('@')
+            if len(args.emb_filename) > 0:
+                    embed_filepath = os.path.join(args.embedding_root_dir, args.dataset, args.emb_filename)
+                    try:
+                        embeds = pickle.load(open(embed_filepath, 'rb'))
+                    except:
+                        embeds = None
+                    if embeds:
+                        print('Using embeddings: ',args.emb_filename)
+                    config_kwargs.update({
+                    'hidden_size':int(args.emb_size),
+                    'num_attention_heads':int(args.emb_size)//10
+                    })
+
             config = AutoConfig.from_pretrained(
                 model_class,
                 **config_kwargs
@@ -918,6 +933,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
     model = model_cls(config)
 
+
     # model = DistilGPT2TwoHeadModel(config)
     ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
     # Dataset directories.
@@ -925,6 +941,11 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
     kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+
+    if embeds:
+        mapper = EmbeddingMapper(tokenizer, kg, embeds)      
+        mapper.init_with_embedding(model.transformer.wte.weight)
+        print(f'Model {model_name} initialized with custom embeddings of size: ', model.transformer.wte.weight.shape)
 
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 

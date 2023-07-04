@@ -465,7 +465,9 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
     u2p_rel_id = LiteralPath.interaction_rel_id
     user_prod_cache = dict()
     unique_path_set = set()    
-    def dfs(uid, prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, cur_hop, path, prev_rel, n_hop, start_ent_type, end_ent_type):
+    def dfs(uid, prev_ent_t, cur_ent_t, prev_ent_id, cur_ent_id, cur_hop, path, prev_rel, n_hop, start_ent_type, end_ent_type,
+                                    cur_attempts,
+                                    max_attempts=8000): # orig is 2k
         if cur_hop >= n_hop:
             path = [ str(x) for x in path]
             #path = [x if isinstance(x,int) else x.item()  for x in path]
@@ -565,7 +567,7 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
 
                     path.append(f'{type_prefix}{next_ent_id}')
                     #dfs(prev_ent_t, uid, cur_ent_t, cur_ent_id, cur_hop, path)
-                    if dfs(uid, cur_ent_t, cand_type, cur_ent_id, next_ent_id, cur_hop+1, path, rel_id, n_hop, start_ent_type, end_ent_type):
+                    if dfs(uid, cur_ent_t, cand_type, cur_ent_id, next_ent_id, cur_hop+1, path, rel_id, n_hop, start_ent_type, end_ent_type,cur_attempts,max_attempts):
                         if with_type:
                             path.pop()
                         path.pop()
@@ -573,7 +575,10 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                             path.pop()
                         path.pop()                    
                         return True
-
+                    else:
+                        cur_attempts[0] += 1
+                    if cur_attempts[0] >= max_attempts:
+                        return True
                     if with_type:
                         path.pop()
 
@@ -650,9 +655,9 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
 
                 prev_ent_t = cur_start_ent_type
                 cur_ent_t = cur_start_ent_type
+                
 
-
-                dfs(uid, cur_start_ent_type, cur_start_ent_type, id, id, cur_hop, path, -100, cur_n_hop, cur_start_ent_type, end_ent_type)
+                dfs(uid, cur_start_ent_type, cur_start_ent_type, id, id, cur_hop, path, -100, cur_n_hop, cur_start_ent_type, end_ent_type, [0])
                 cnt += 1
                 '''
                 cur_hop = 1
@@ -846,7 +851,7 @@ class KGstats:
         
         self.pid2eid = { pid : eid for pid,eid in zip(pid_df.pid.values.tolist(), pid_df.eid.values.tolist())  }
         self.rel_id2type = { int(i) : rel_name for i,rel_name in zip(rel_df.id.values.tolist(), rel_df.name.values.tolist())  } 
-        self.rel_id2type[LiteralPath.interaction_rel_id] = INTERACTION[dataset_name]
+        self.rel_id2type[int(LiteralPath.interaction_rel_id)] = INTERACTION[dataset_name]
         #print(self.rel_id2type)
 
         self.rel_type2id = { v:k for k,v in self.rel_id2type.items() }
