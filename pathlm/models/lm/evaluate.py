@@ -101,6 +101,7 @@ class Evaluator:
             eval_device='cpu',
             tokenized_kg=None,
             custom_model_name=None,
+            logit_processor_type='gcd',
     ):
         data_dir = f"data/{dataset_name}"
         self.tokenizer = tokenizer
@@ -127,11 +128,11 @@ class Evaluator:
         logit_processor = None
         if logit_processor_type == 'gcd':
             logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
-        elif logits_processor_type == 'pgcd':
+        elif logit_processor_type == 'pgcd':
             logit_processor_cls = PrefixConstrainedLogitsProcessorWordLevel
         else:
             logit_processor_cls = PLMLogitsProcessorWordLevel 
-
+        print('Using: ', logit_processor_cls)
         self.logits_processor = LogitsProcessorList([
             logit_processor_cls(tokenized_kg=tokenized_kg,
                                 force_token_map=self.user_negatives_token_ids,
@@ -315,7 +316,7 @@ if __name__ == "__main__":
                         help="Path sequence deconding method: default to Graph Constrained Decoding")    
 
 
-                            
+
     parser.add_argument("--n_hop", type=str, default="3",
                         help="")
     parser.add_argument("--model", type=str, default="distilgpt2", help="{distilgpt2, gpt2, gpt2-large}")
@@ -370,5 +371,6 @@ if __name__ == "__main__":
         n_sequences_per_user = args.n_seq_infer,
         tokenizer = tokenizer,
         eval_device = args.eval_device,
-        custom_model_name = model_folder
+        custom_model_name = model_folder,
+        logit_processor_type=args.logit_processor_type,
     ).evaluate(model)
