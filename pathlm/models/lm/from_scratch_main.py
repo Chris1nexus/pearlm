@@ -574,6 +574,7 @@ class CustomTrainer(Trainer):
             n_hop=3,
             infer_batch_size=1,
             n_sequences_per_user=10,
+            n_beams=30,
             tokenizer=None,
             eval_device='cpu',
             tokenized_kg=None,
@@ -595,7 +596,9 @@ class CustomTrainer(Trainer):
 
         self.SEQUENCE_LEN = 2 * n_hop + 2  # Special tokens [BOS] included
 
-        self.INFERENCE_BATCH_SIZE = args.infer_batch_size
+        self.N_RET_SEQ = n_sequences_per_user
+        self.N_BEAMS = n_beams
+        self.INFERENCE_BATCH_SIZE = infer_batch_size
         self.N_SEQUENCES_PER_USER = n_sequences_per_user
         print('Sequence length: ', self.SEQUENCE_LEN)
 
@@ -634,8 +637,8 @@ class CustomTrainer(Trainer):
                     **inputs,
                     max_length=self.SEQUENCE_LEN,
                     min_length=self.SEQUENCE_LEN,
-                    num_return_sequences=30,
-                    num_beams=30,
+                    num_return_sequences=self.N_RET_SEQ,
+                    num_beams=self.N_BEAMS,
                     length_penalty=0.,
                     num_beam_groups=5,
                     diversity_penalty=0.3,
@@ -671,7 +674,7 @@ class CustomTrainer(Trainer):
                 sorted_indices = outputs.sequences_scores.argsort(descending=True)
                 sorted_sequences = outputs.sequences[sorted_indices]
                 K = 10
-                count = 0
+                
                 for sequence in sorted_sequences:
                     sequence = tokenizer.decode(sequence).split(' ')
                     uid = sequence[1][1:]
@@ -681,7 +684,6 @@ class CustomTrainer(Trainer):
                     recommended_item = recommended_token[1:]
                     # assert len(recommended_token) >= 2 and recommended_token.startswith("P")
                     if recommended_item not in self.user_negatives[uid]:
-                        count = +1
                         continue
                     if recommended_item in topk[uid]:
                         continue
@@ -811,7 +813,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}"
 
     STEP_INTERVAL = 50
     EVAL_STEP_INTERVAL = 1000
@@ -850,6 +852,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
         n_hop=args.n_hop,
         infer_batch_size=args.infer_batch_size,
         n_sequences_per_user=args.n_seq_infer,
+        n_beams=args.n_beams,        
         tokenizer=tokenizer,
         eval_device=args.eval_device,
         model=model,
@@ -952,7 +955,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}"
 
     STEP_INTERVAL = 100
     EVAL_STEP_INTERVAL = 500
@@ -990,6 +993,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         n_hop=args.n_hop,
         infer_batch_size=args.infer_batch_size,
         n_sequences_per_user=args.n_seq_infer,
+        n_beams=args.n_beams,         
         tokenizer=tokenizer,
         eval_device=args.eval_device,
         model=model,
@@ -1153,8 +1157,10 @@ if __name__ == "__main__":
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--eval_ckpt_iter", type=int, default='1', help="")
     parser.add_argument("--infer_batch_size", type=int, default=256, help="Inference batch size")
-    parser.add_argument("--n_seq_infer", type=int, default=10,
-                        help="Number of sequences generated for each user at inference time")
+    parser.add_argument("--n_seq_infer", type=int, default=30,
+                        help="Number of sequences generated for each user")
+    parser.add_argument("--n_beams", type=int, default=30,
+                        help="Number of sequences generated for each user")    
 
     # Parameter relative to resume training
     parser.add_argument("--continue_training", type=bool, default=False,
