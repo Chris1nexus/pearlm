@@ -614,11 +614,11 @@ class CustomTrainer(Trainer):
         logit_processor = None
         if logit_processor_type == 'gcd':
             logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
-        elif logits_processor_type == 'pgcd':
+        elif logit_processor_type == 'pgcd':
             logit_processor_cls = PrefixConstrainedLogitsProcessorWordLevel
         else:
             logit_processor_cls = PLMLogitsProcessorWordLevel 
-
+        print('Using: ', logit_processor_cls)
         self.logits_processor = LogitsProcessorList([
             logit_processor_cls(tokenized_kg=tokenized_kg,
                                 force_token_map=self.user_negatives_token_ids,
@@ -1011,6 +1011,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         args=training_args,
         train_dataset=tokenized_dataset["train"],
         experiment_name=custom_name,
+        logit_processor_type=args.logit_processor_type,
         data_collator=data_collator)
 
     # Train model
