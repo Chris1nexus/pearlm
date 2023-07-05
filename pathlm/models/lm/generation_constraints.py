@@ -153,12 +153,12 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
-        min_score = float("-Inf")#scores.min()
+        min_score = scores.min()
         if cur_len == self.total_length:
             num_tokens = scores.shape[1]
             scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = min_score  # float("-Inf")
             for i in self.eos_token_ids:
-                scores[:, i] = 1.
+                scores[:, i] = 0.
         elif cur_len == self.total_length-1:
             mask_list = []
             for idx in range(scores.shape[0]):
