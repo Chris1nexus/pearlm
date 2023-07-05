@@ -24,7 +24,7 @@ from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.utils import is_torch_tpu_available
 
-from pathlm.models.lm.evaluate import evaluate
+
 from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
