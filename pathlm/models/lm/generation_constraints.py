@@ -92,7 +92,7 @@ class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
-        min_score = scores.min()
+        
         if cur_len == self.total_length:
             num_tokens = scores.shape[1]
             scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = float("-Inf")

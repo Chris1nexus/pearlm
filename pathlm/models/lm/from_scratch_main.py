@@ -964,7 +964,9 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}-{args.logit_processor_type}"
+    #custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}-{args.logit_processor_type}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.logit_processor_type}"
+
 
     STEP_INTERVAL = 100
     EVAL_STEP_INTERVAL = 500
@@ -1279,7 +1281,7 @@ if __name__ == "__main__":
     if args.load_model: #ENSURE IS WORKING
         # Training arguments
         curr_sample_size = args.sample_size_pretrain if args.task == 'pretrain' else args.sample_size_finetune
-        custom_name = f'clm-{args.task}-{args.dataset}-{args.model}-{curr_sample_size}-{args.sample_size_hop}/checkpoint-{args.eval_ckpt_iter}'  # f"clm-from_scratch-{args.dataset}-{args.model}"
+        custom_name = f'clm-{args.task}-{args.dataset}-{args.model}-{curr_sample_size}-{args.sample_size_hop}-{args.logit_processor_type}/checkpoint-{args.eval_ckpt_iter}'  # f"clm-from_scratch-{args.dataset}-{args.model}"
         model = AutoModelForCausalLM.from_pretrained(
             custom_name)  # f'models-weights/{dataset_name}/{model_name}/{custom_name}')
     else:
