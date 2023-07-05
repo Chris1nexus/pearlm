@@ -25,7 +25,7 @@ from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.utils import is_torch_tpu_available
 
 from pathlm.models.lm.evaluate import evaluate
-from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel
+from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.path_dataset import PathDataset
@@ -579,6 +579,7 @@ class CustomTrainer(Trainer):
             eval_device='cpu',
             tokenized_kg=None,
             experiment_name=None,
+            logit_processor_type='gcd',
             **kwargs
     ):
         super().__init__(**kwargs)
@@ -610,16 +611,24 @@ class CustomTrainer(Trainer):
         init_condition_fn = lambda uid: f"[BOS] U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids]}
 
-        self.logits_processor = LogitsProcessorList([
+        logit_processor = None
+        if logit_processor_type == 'gcd':
+            logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
+        elif logits_processor_type == 'pgcd':
+            logit_processor_cls = PrefixConstrainedLogitsProcessorWordLevel
+        else:
+            logit_processor_cls = PLMLogitsProcessorWordLevel 
 
-            ConstrainedLogitsProcessorWordLevel(tokenized_kg=tokenized_kg,
-                                                force_token_map=self.user_negatives_token_ids,
-                                                tokenizer=tokenizer,
-                                                total_length=self.SEQUENCE_LEN,  # LAST_TOKEN_POS,
-                                                num_return_sequences=self.N_SEQUENCES_PER_USER,
-                                                id_to_uid_token_map=self.id_to_uid_token_map,
-                                                eos_token_ids=[
-                                                    self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)])
+        self.logits_processor = LogitsProcessorList([
+            logit_processor_cls(tokenized_kg=tokenized_kg,
+                                force_token_map=self.user_negatives_token_ids,
+                                tokenizer=tokenizer,
+                                total_length=self.SEQUENCE_LEN,  # LAST_TOKEN_POS,
+                                num_return_sequences=self.N_SEQUENCES_PER_USER,
+                                id_to_uid_token_map=self.id_to_uid_token_map,
+                                eos_token_ids=[
+                                self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)]
+                            )
         ])
 
         self.test_dataset = Dataset.from_dict(self.inference_paths)
@@ -813,7 +822,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}-{args.logit_processor_type}"
 
     STEP_INTERVAL = 50
     EVAL_STEP_INTERVAL = 1000
@@ -885,7 +894,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
     # Initializing a model from the configuration
     if args.continue_training and args.pretrain_ckpt is not None:
-        pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}'
+        pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.logit_processor_type}/checkpoint-{args.pretrain_ckpt}'
         config = AutoConfig.from_pretrained(
             pretrain_model,
             **config_kwargs
@@ -955,7 +964,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
 
     # Training arguments
-    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}"
+    custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}-{args.logit_processor_type}"
 
     STEP_INTERVAL = 100
     EVAL_STEP_INTERVAL = 500
@@ -1024,7 +1033,7 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
         'eos_token_id': tokenizer.eos_token_id,
     }
 
-    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}/checkpoint-{args.pretrain_ckpt}'
+    pretrain_model = f'./clm-pretrain-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_hop}-{args.logit_processor_type}/checkpoint-{args.pretrain_ckpt}'
     config = AutoConfig.from_pretrained(
         pretrain_model,
         **config_kwargs
@@ -1142,6 +1151,8 @@ if __name__ == "__main__":
                         help="Which sample size dataset to use for fine-tuning/end-to-end")
     parser.add_argument("--sample_size_hop", type=str, default="3",
                         help="Which number of hops dataset to use for fine-tuning/end-to-end")
+    parser.add_argument("--logit_processor_type", type=str, default="gcd",
+                        help="Path sequence deconding method: default to Graph Constrained Decoding")    
     # Model arguments
     parser.add_argument("--model", type=str, default="gpt2-large",
                         help="Model to use from HuggingFace pretrained models")
