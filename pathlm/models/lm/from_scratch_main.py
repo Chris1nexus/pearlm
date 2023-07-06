@@ -42,7 +42,7 @@ from datasets import Dataset
 from os import listdir
 from os.path import isfile, join
 import pandas as pd
-
+import math
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 
 class PathDataset:
@@ -153,11 +153,11 @@ def _initialise_type_masks(tokenizer, allow_special=False):
     class_weight = 1
     token_id_to_token = dict()
     for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda x: x[1]):
-        if token[0] == LiteralPath.rel_type or (not token[0].isalpha() and allow_special) :
+        if token[0] == LiteralPath.rel_type: #or (not token[0].isalpha() and allow_special) :
             rel_mask.append(class_weight)
         else:
             rel_mask.append(0)
-        if token[0] != LiteralPath.rel_type or (not token[0].isalpha() and allow_special):
+        if token[0] == LiteralPath.user_type or token[0] == LiteralPath.prod_type or token[0] == LiteralPath.ent_type:# or (not token[0].isalpha() and allow_special):
             ent_mask.append(class_weight)
         else:
             ent_mask.append(0)
@@ -460,7 +460,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-
+        """
         sequence_output = transformer_outputs[0]
         
         entity_mask = type_ids[:, :] == self.ENTITY_ID
@@ -522,8 +522,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #relation_token_ids = types_ids == DistilGPT2TwoHeadModel.RELATION_ID
 
         # Get logits from the two heads, first based on entity tokens, then on relation tokens
-        lm_entity_logits = self.lm_entity_head(hidden_states)#[entity_token_ids])
-        lm_relation_logits = self.lm_relation_head(hidden_states)#[relation_token_ids])
+        lm_entity_logits = self.entity_head(hidden_states)#[entity_token_ids])
+        lm_relation_logits = self.relation_head(hidden_states)#[relation_token_ids])
         batch_size = input_ids.shape[0]
         sequence_len = input_ids.shape[-1]
 
@@ -585,7 +585,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
                     self.rel_mask_weight)
 
         for i in range(sequence_len ):
-            if i % 2 == 0:
+            if i % 2 == 1:
                 lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
         #'''
         #for i in range(sequence_len ):
@@ -632,7 +632,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
-        """
+        #"""
 
 
 
@@ -1180,7 +1180,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
 
     STEP_INTERVAL = 100
-    EVAL_STEP_INTERVAL = 100
+    EVAL_STEP_INTERVAL = 1000
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         f"clm-{custom_name}",
@@ -1308,7 +1308,7 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
         save_strategy='steps',
         eval_steps=EVAL_STEP_INTERVAL,
         logging_steps=STEP_INTERVAL,
-        learning_rate=3e-5,
+        learning_rate=2e-4,#3e-5,
         weight_decay=0.01,
         bf16=False,
         fp16=True,

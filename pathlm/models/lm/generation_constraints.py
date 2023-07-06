@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from collections import defaultdict
-
+import math
 from transformers import LogitsProcessor
 
 """
@@ -161,6 +161,33 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
+        if cur_len == self.total_length:
+            num_tokens = scores.shape[1]
+            scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = float("-Inf")
+            for i in self.eos_token_ids:
+                scores[:, i] = 0.  
+        elif cur_len == self.total_length+1:
+            mask = torch.full_like(scores, -math.inf)
+            for idx in range(scores.shape[0]):
+                cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
+                if cur_len % 2 == 1:
+                        # parse ent -----> candidate relations
+                        candidate_tokens = self.ent_ids
+                        if cur_len == self.total_length - 1: # Remove from candidates products not in user negatives
+                            candidate_tokens = self.force_token_map[cur_uid]
+                        key = cur_uid,idx
+                else:
+                    candidate_tokens = self.rel_ids
+                    key = idx
+
+                #if key not in self.mask_cache:
+                #    mask = np.isin(self.vocab_tokens, candidate_tokens)
+                #    self.mask_cache[key] = mask
+
+                #candidate_tokens = self.mask_cache[key]
+                mask[idx, candidate_tokens] = 0.
+            scores = scores + mask
+        '''
         min_score = scores.min()
         if cur_len == self.total_length:
             num_tokens = scores.shape[1]
@@ -190,7 +217,8 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
 
             mask = np.vstack(mask_list)
             scores[~mask] = min_score
-            #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
+        '''
+        #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
 
     def __decode(self, token_ids):
