@@ -171,7 +171,7 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
             mask_list = []
             
             for idx in range(scores.shape[0]):
-                cur_uid = self.id_to_uid_token_map[input_ids[idx, 0].item()]
+                cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
                 if cur_len % 2 == 1:
                     # parse ent -----> candidate relations
                     candidate_tokens = self.ent_ids

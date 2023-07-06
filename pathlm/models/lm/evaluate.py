@@ -304,7 +304,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, default="ml1m", help="{ml1m, lfm1m}")
     parser.add_argument("--task", type=str, default="end-to-end", help="{pretrain, finetune, end-to-end}")
     parser.add_argument("--loading_checkpoint", type=bool, default=True, help="True to load checkpoint False to load from model-weights")
-        parser.add_argument("--sample_size", type=str, default="1000",
+    parser.add_argument("--sample_size", type=str, default="1000",
                         help="Which sample size dataset to use for fine-tuning/end-to-end")
     # Model arguments
     parser.add_argument("--model", type=str, default="gpt2-large",
@@ -316,7 +316,7 @@ if __name__ == "__main__":
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--context_length", type=int, default=24,
                         help="Context length value when training a tokenizer from scratch")
-        parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
+    parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
     parser.add_argument("--infer_batch_size", type=int, default=128, help="Inference batch size")
     parser.add_argument("--n_seq_infer", type=int, default=10,
                         help="Number of sequences generated for each user at inference time")

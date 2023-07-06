@@ -23,12 +23,13 @@ from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
     set_seed, GPT2LMHeadModel, GPT2Model, EarlyStoppingCallback
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 from transformers.utils import is_torch_tpu_available
-
+import pandas as pd
+from os.path import join
 
 from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
-from pathlm.models.lm.path_dataset import PathDataset
+#from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.models.rl.PGPR.pgpr_utils import RELATION
 from pathlm.sampling.container.constants import LiteralPath, TypeMapper
 from pathlm.sampling.container.kg_analyzer import KGstats
@@ -36,6 +37,116 @@ from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.utils import SEED, get_pid_to_eid, get_set, check_dir
 
 
+from multiprocessing import Pool
+from datasets import Dataset
+from os import listdir
+from os.path import isfile, join
+import pandas as pd
+
+from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
+
+class PathDataset:
+    def __init__(self, dataset_name: str, base_data_dir: str="", task: str=None, sample_size: str=None, n_hop: str=None, plain_text_path=False):
+        self.dataset_name = dataset_name
+        self.base_data_dir = base_data_dir
+        self.data_dir = join(self.base_data_dir, "paths_random_walk")
+        self.task = task
+        self.sample_size = sample_size
+        self.n_hop = n_hop
+
+        self.read_single_csv_to_hf_dataset()
+        # Get eid2name and rid2name
+        self.eid2name = get_eid_to_name_map(self.base_data_dir)
+        self.rid2name = get_rid_to_name_map(self.base_data_dir)
+        self.plain_text_path = plain_text_path
+
+
+    # Based on the path struct, for now it is p to p
+    def convert_numeric_path_to_textual_path(self, path: str) -> str:
+        path_list = path.split(" ")
+        ans = []
+        for pos, token in enumerate(path_list):
+            # Handle user and watched relation
+            if pos == 0:
+                ans.append(f"U{token}")
+            elif pos == 1:
+                ans.append(token)
+            # Handle recommendation
+            elif pos == 2 or pos == 6 or pos == 10:
+                #ans.append("<recommendation>")
+                ans.append(self.eid2name[token])
+            # Handle entity
+            elif pos % 2 == 0:
+                ans.append(self.eid2name[token])
+            # Handle relation
+            else:
+                ans.append(self.rid2name[token])
+            ans.append("<word_end>")
+        return " ".join(ans)
+
+    def keep_numeric(self, path: str) -> str:
+        path_list = path.split(" ")
+        ans = []
+        for pos, token in enumerate(path_list):
+            # Handle user
+            if pos == 0:
+                ans.append(f"U{token}")
+            elif pos == 1:
+                ans.append(token)
+            # Handle recommendation
+            elif pos == 2 or pos == 6 or pos == 10:
+                ans.append(f"P{token}")
+            # Handle entity
+            elif pos % 2 == 0:
+                ans.append(f"E{token}")
+            # Handle relation
+            else:
+                ans.append(f"R{token}")
+        return " ".join(ans)
+
+    def read_csv_as_dataframe(self, filename: str) -> pd.DataFrame:
+        return pd.read_csv(join(self.data_dir, filename), header=None, names=["path"], index_col=None)
+
+    def read_multiple_csv_to_hf_dataset(self):
+        file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
+
+        # set up your pool
+        #with Pool(processes=8) as pool:  # orc whatever your hardware can support
+        #    df_list = pool.map(self.read_csv_as_dataframe, file_list)#
+        #
+        #    # reduce the list of dataframes to a single dataframe
+        df_list = []
+        for filename in file_list:
+            df_list.append(self.read_csv_as_dataframe(filename))
+
+        combined_df = pd.concat(df_list, ignore_index=True)
+
+
+        # Convert to HuggingFace Dataset
+        self.dataset = Dataset.from_pandas(combined_df)
+
+    def read_single_csv_to_hf_dataset(self):
+        #file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
+        #filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
+        filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
+        #filepath = join(self.data_dir, filename)
+
+
+        df = self.read_csv_as_dataframe(filename)
+        self.dataset = Dataset.from_pandas(df)
+        
+        #for filename in file_list:
+        #    print(filename)
+        #    if filename == f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt':#
+        #
+        #        df = self.read_csv_as_dataframe(filename)
+        #        self.dataset = Dataset.from_pandas(df)
+        #        continue
+
+
+
+    def show_random_examples(self):
+        print(self.dataset["path"][:10])
 def _initialise_type_masks(tokenizer, allow_special=False):
     ent_mask = []
     rel_mask = []
@@ -179,8 +290,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         self.type_ids_row, self.type_embeds_row = self.__init_type_embeddings(1, self.context_length)
 
         # Create an additional linear layer for the second prediction head
-        self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.init_weights()
 
@@ -350,6 +461,54 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             return_dict=return_dict,
         )
 
+        sequence_output = transformer_outputs[0]
+        
+        entity_mask = type_ids[:, :] == self.ENTITY_ID
+        relation_mask = type_ids[:, :] == self.RELATION_ID
+
+
+        #print(entity_mask.shape)
+        entity_sequence_output = sequence_output * entity_mask.unsqueeze(-1)
+        relation_sequence_output = sequence_output * relation_mask.unsqueeze(-1)
+        
+        entity_scores = self.entity_head(entity_sequence_output)
+        relation_scores = self.relation_head(relation_sequence_output)
+
+        entity_loss = None
+        relation_loss = None
+        if labels is not None:
+            # Shift scores and labels by one
+            entity_scores_shifted = entity_scores[:, :-1, :].contiguous()
+            relation_scores_shifted = relation_scores[:, :-1, :].contiguous()
+            
+            labels_shifted = labels[:, 1:].contiguous()
+            entity_labels = labels_shifted * entity_mask[:, 1:]
+            relation_labels = labels_shifted * relation_mask[:, 1:]
+
+            loss_fct = CrossEntropyLoss(ignore_index=-100)
+            
+            entity_loss = loss_fct(entity_scores_shifted.view(-1, self.config.vocab_size), entity_labels.view(-1))
+            relation_loss = loss_fct(relation_scores_shifted.view(-1, self.config.vocab_size), relation_labels.view(-1))
+
+        total_loss = (entity_loss + relation_loss) if entity_loss is not None and relation_loss is not None else None
+
+        # Combine entity and relation scores back into original sequence order
+        combined_scores = entity_scores * entity_mask.unsqueeze(-1) + relation_scores * relation_mask.unsqueeze(-1)
+
+        if not return_dict:
+            output = (combined_scores,) + transformer_outputs[2:]
+            return ((total_loss,) + output) if total_loss is not None else output
+
+        return CausalLMOutputWithCrossAttentions(
+            loss=total_loss,
+            logits=combined_scores,
+            past_key_values=transformer_outputs.past_key_values,
+            hidden_states=transformer_outputs.hidden_states,
+            attentions=transformer_outputs.attentions,
+            cross_attentions=transformer_outputs.cross_attentions,
+        )
+
+        """
 
         hidden_states = transformer_outputs[0]
         # Set device for model parallelism
@@ -473,7 +632,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             attentions=transformer_outputs.attentions,
             cross_attentions=transformer_outputs.cross_attentions,
         )
-
+        """
 
 
 
@@ -900,6 +1059,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
         load_best_model_at_end=True,
         metric_for_best_model='ndcg',
         greater_is_better=True,
+        #no_cuda=True,
         seed=SEED,
     )
 
@@ -1031,7 +1191,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         learning_rate=3e-5,
         weight_decay=0.01,
         bf16=False,
-        fp16=True,
+        fp16=True,#True,
         logging_first_step=True,
         # use_mps_device=True,
         num_train_epochs=2,
@@ -1044,6 +1204,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
         metric_for_best_model='ndcg',
         greater_is_better=True,
         seed=SEED,
+        #no_cuda=True,
     )
 
     tokenizer.pad_token = tokenizer.eos_token
@@ -1213,8 +1374,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gpt2-large",
                         help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--nproc", type=int, default=8, help="Number of processes for dataset mapping")
-        parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
-    parser.add_argument("--infer_batch_size", type=int, default=256, help="Inference batch size")
+    parser.add_argument("--batch_size", type=int, default=256, help="Train batch size")
+    parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
     parser.add_argument("--context_length", type=int, default=24,
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,
@@ -1259,8 +1420,8 @@ if __name__ == "__main__":
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data:
         task = args.task
-        if task == 'end-to-end':  # They share the same dataset
-            task = 'finetune'
+        if task == 'finetune':  # They share the same dataset
+            task = 'end-to-end'
         tokenized_dataset = load_from_disk(
             f"data/{dataset_name}/{TOKENIZER_TYPE}/{task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
         tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
