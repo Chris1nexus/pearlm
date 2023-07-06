@@ -36,25 +36,26 @@ from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.utils import SEED, get_pid_to_eid, get_set, check_dir
 
 
-def _initialise_type_masks(tokenizer):
+def _initialise_type_masks(tokenizer, allow_special=False):
     ent_mask = []
     rel_mask = []
-    class_weight = 1.
+    class_weight = 1
     token_id_to_token = dict()
     for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda x: x[1]):
-        if token[0] == LiteralPath.rel_type or not token[0].isalpha():
+        if token[0] == LiteralPath.rel_type or (not token[0].isalpha() and allow_special) :
             rel_mask.append(class_weight)
         else:
             rel_mask.append(0)
-        if token[0] != LiteralPath.rel_type or not token[0].isalpha():
+        if token[0] != LiteralPath.rel_type or (not token[0].isalpha() and allow_special):
             ent_mask.append(class_weight)
         else:
             ent_mask.append(0)
 
         token_id_to_token[token_id] = token
-    # print(ent_mask)
-    # print(rel_mask)
+    #print(ent_mask)
+    #print(rel_mask)
     return ent_mask, rel_mask, token_id_to_token
+
 
 
 def _initialise_weights_from_kge(embeds, tokenizer, kg, model_config, model, args):
@@ -146,6 +147,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
     def __init__(self, config):
         super().__init__(config)
         self.config = config
+        self.transformer = GPT2Model(config)
+        
         self.num_labels = config.vocab_size
 
         self.ent_mask = config.ent_mask
@@ -176,10 +179,10 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         self.type_ids_row, self.type_embeds_row = self.__init_type_embeddings(1, self.context_length)
 
         # Create an additional linear layer for the second prediction head
-        self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
-        self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=True)
+        self.lm_entity_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_relation_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
-
+        self.init_weights()
 
     def __init_type_embeddings(self,  batch_size, num_hops):
         #num_hops = self.config.num_hops
@@ -207,6 +210,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         mask_key = (n_rows,n_cols)
         cur_mask = self.even_idx_mask[:(n_cols) ]            
         return torch.vstack([cur_mask for _ in range(n_rows) ] )
+    '''
     def parallelize(self, device_map=None):
         warnings.warn(
             "`GPT2LMHeadModel.parallelize` is deprecated and will be removed in v5 of Transformers, you should load"
@@ -283,7 +287,7 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
             }
         )
         return model_inputs
-
+    '''
 
 
 
@@ -312,20 +316,21 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         #print()
 
         batch_size, seq_len = input_ids.shape
-        k = (batch_size, seq_len) 
+        k = (batch_size, seq_len+1) 
         if k not in self.type_ids_cache:
-            type_ids, type_embeds = self.__init_type_embeddings(batch_size, seq_len)
+            type_ids, type_embeds = self.__init_type_embeddings(batch_size, seq_len+1)
 
-            self.type_ids_cache[k], self.type_embeds_cache[k] = type_ids, type_embeds
+            self.type_ids_cache[k], self.type_embeds_cache[k] = type_ids[:,:-1], type_embeds[:,:-1,:]
         
         type_ids, type_embeds = self.type_ids_cache[k], self.type_embeds_cache[k]
+        #print(type_ids)
         #if self.model_parallel:
         #    torch.cuda.set_device(inputs_embeds.device)
         #    type_embeds = type_embeds.to(inputs_embeds.device)
         
         
         if inputs_embeds is not None:
-            input_embeds += type_embeds
+            inputs_embeds += type_embeds
 
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -360,7 +365,8 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
         # Get logits from the two heads, first based on entity tokens, then on relation tokens
         lm_entity_logits = self.lm_entity_head(hidden_states)#[entity_token_ids])
         lm_relation_logits = self.lm_relation_head(hidden_states)#[relation_token_ids])
-
+        batch_size = input_ids.shape[0]
+        sequence_len = input_ids.shape[-1]
 
 
 
@@ -420,9 +426,44 @@ class DistilGPT2TwoHeadModel(GPT2LMHeadModel):
                     self.rel_mask_weight)
 
         for i in range(sequence_len ):
-            if i % 2 == 1:
+            if i % 2 == 0:
                 lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
+        #'''
+        #for i in range(sequence_len ):
+        #    if i % 2 == 0:
+        #        lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
+        #loss = 0.
+        #if labels is not None:
+        #    loss = compute_loss(lm_entity_logits[:,:(-1),:], labels[:,1:])
+        '''
+        loss = None
+        if labels is not None:
+            # Shift so that tokens < n predict n
+            entity_logits_shifted = lm_entity_logits[..., :-1:2, :].contiguous()
+            relation_logits_shifted = lm_relation_logits[..., 1:-1:2, :].contiguous()
+     
+            labels_shifted = labels[..., 1:].contiguous()
+            entity_labels_shifted = labels_shifted[..., ::2].contiguous()
+            relation_labels_shifted = labels_shifted[..., 1::2].contiguous()
+     
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            entity_loss = loss_fct(entity_logits_shifted.view(-1, entity_logits_shifted.size(-1)), entity_labels_shifted.view(-1))
+            relation_loss = loss_fct(relation_logits_shifted.view(-1, relation_logits_shifted.size(-1)), relation_labels_shifted.view(-1))
+            loss = entity_loss + relation_loss  
 
+        #print(entity_logits[0,:3, :5], entity_logits.device)
+        #print(relation_logits[0,:3, :5], relation_logits.device)
+        #print(entity_logits[0,:3, :5], entity_logits.device)
+        #print()
+        
+        for i in range(sequence_len ):
+            if i % 2 == 0:
+                lm_entity_logits[:,i, :] = lm_relation_logits[:,i,:]  
+        '''
+        if not return_dict:
+            output = (lm_entity_logits,) + transformer_outputs[2:]
+            return ((loss,) + output) if loss is not None else output                
 
         return CausalLMOutputWithCrossAttentions(
             loss=loss,
@@ -612,13 +653,20 @@ class CustomTrainer(Trainer):
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids]}
 
         logit_processor = None
+        logit_proc_kwargs = {}
         if logit_processor_type == 'gcd':
             logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
         elif logit_processor_type == 'pgcd':
             logit_processor_cls = PrefixConstrainedLogitsProcessorWordLevel
         else:
             logit_processor_cls = PLMLogitsProcessorWordLevel 
+            ent_mask, rel_mask, token_id_to_token = _initialise_type_masks(tokenizer)
+            logit_proc_kwargs['ent_mask'] = ent_mask
+            logit_proc_kwargs['rel_mask'] = rel_mask
+            logit_proc_kwargs['token_id_to_token'] = token_id_to_token
         print('Using: ', logit_processor_cls)
+
+
         self.logits_processor = LogitsProcessorList([
             logit_processor_cls(tokenized_kg=tokenized_kg,
                                 force_token_map=self.user_negatives_token_ids,
@@ -627,7 +675,8 @@ class CustomTrainer(Trainer):
                                 num_return_sequences=self.N_SEQUENCES_PER_USER,
                                 id_to_uid_token_map=self.id_to_uid_token_map,
                                 eos_token_ids=[
-                                self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)]
+                                self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)],
+                                **logit_proc_kwargs
                             )
         ])
 
@@ -686,12 +735,14 @@ class CustomTrainer(Trainer):
                 
                 for sequence in sorted_sequences:
                     sequence = tokenizer.decode(sequence).split(' ')
+                    #print(sequence)
                     uid = sequence[1][1:]
                     if len(topk[uid]) >= K:
                         continue
                     recommended_token = sequence[-1]
                     recommended_item = recommended_token[1:]
-                    # assert len(recommended_token) >= 2 and recommended_token.startswith("P")
+                    if not recommended_token.startswith("P"):
+                        continue
                     if recommended_item not in self.user_negatives[uid]:
                         continue
                     if recommended_item in topk[uid]:
@@ -825,7 +876,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     custom_name = f"{args.task}-{args.dataset}-{args.model}-{args.sample_size_pretrain}-{args.sample_size_finetune}-{args.sample_size_hop}-{args.n_beams}-{args.n_seq_infer}-{args.logit_processor_type}"
 
     STEP_INTERVAL = 50
-    EVAL_STEP_INTERVAL = 1000
+    EVAL_STEP_INTERVAL = 500
 
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
@@ -915,10 +966,10 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
                         embeds = None
                     if embeds:
                         print('Using embeddings: ',args.emb_filename)
-                    config_kwargs.update({
-                    'hidden_size':int(args.emb_size),
-                    'num_attention_heads':int(args.emb_size)//10
-                    })
+                        config_kwargs.update({
+                        'hidden_size':int(args.emb_size),
+                        'num_attention_heads':int(args.emb_size)//10
+                        })
 
             config = AutoConfig.from_pretrained(
                 model_class,
@@ -969,7 +1020,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
 
 
     STEP_INTERVAL = 100
-    EVAL_STEP_INTERVAL = 500
+    EVAL_STEP_INTERVAL = 100
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         f"clm-{custom_name}",
@@ -1156,12 +1207,14 @@ if __name__ == "__main__":
                         help="Which number of hops dataset to use for fine-tuning/end-to-end")
     parser.add_argument("--logit_processor_type", type=str, default="gcd",
                         help="Path sequence deconding method: default to Graph Constrained Decoding")    
+
+
     # Model arguments
     parser.add_argument("--model", type=str, default="gpt2-large",
                         help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--nproc", type=int, default=8, help="Number of processes for dataset mapping")
-    parser.add_argument("--batch_size", type=int, default=512, help="Train batch size")
-    parser.add_argument("--test_batch_size", type=int, default=512, help="Test batch size")
+        parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
+    parser.add_argument("--infer_batch_size", type=int, default=256, help="Inference batch size")
     parser.add_argument("--context_length", type=int, default=24,
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--n_hop", type=int, default=3,

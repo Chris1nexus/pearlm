@@ -136,8 +136,16 @@ class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
 
 class PLMLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
-                 id_to_uid_token_map, eos_token_ids, **kwargs):
+                 id_to_uid_token_map, eos_token_ids, ent_mask, rel_mask, token_id_to_token, **kwargs):
         super().__init__(**kwargs)
+        self.ent_ids = [idx for idx, elem in enumerate(ent_mask) if elem > 0]
+        self.rel_ids = [idx for idx, elem in enumerate(rel_mask) if elem > 0]
+        
+
+        self.ent_mask = [elem > 0 for idx, elem in enumerate(ent_mask) ]
+        self.rel_mask = [elem > 0 for idx, elem in enumerate(rel_mask) ]
+        
+        self.token_id_to_token = token_id_to_token
         self.kg = tokenized_kg
         self.force_token_map = force_token_map
         self.total_length = total_length
@@ -159,35 +167,24 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
             scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = min_score  # float("-Inf")
             for i in self.eos_token_ids:
                 scores[:, i] = 0.
-        elif cur_len == self.total_length-1:
+        else:
             mask_list = []
+            
             for idx in range(scores.shape[0]):
+                cur_uid = self.id_to_uid_token_map[input_ids[idx, 0].item()]
                 if cur_len % 2 == 1:
                     # parse ent -----> candidate relations
-                    cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
-                    k1 = input_ids[idx, -2].item()
-                    k2 = input_ids[idx, -1].item()
-                    key = k1, k2
-                    if key not in self.cache:
-                        if k1 in self.kg and k2 in self.kg[k1]:
-                            self.cache[key] = list(self.kg[k1][k2])
-                        else:
-                            self.cache[key] = []
+                    candidate_tokens = self.ent_ids
                     if cur_len == self.total_length - 1: # Remove from candidates products not in user negatives
-                        self.cache[key] = list(set(self.cache[key]).intersection(set(self.force_token_map[cur_uid])))
-                else:
-                    # parse ent->rel    -----> candidates
-                    k1 = input_ids[idx, -1].item()
-                    key = k1
-                    if key not in self.cache:
-                        if k1 in self.kg:
-                            self.cache[key] = list(self.kg[k1].keys())
-                        else:
-                            self.cache[key] = []
+                        candidate_tokens = self.force_token_map[cur_uid]
+                    key = cur_uid,idx
 
-                candidate_tokens = self.cache[key]
+                else:
+                    candidate_tokens = self.rel_ids
+                    key = idx
                 if key not in self.mask_cache:
-                    self.mask_cache[key] = np.isin(self.vocab_tokens, candidate_tokens)
+                    mask = np.isin(self.vocab_tokens, candidate_tokens)
+                    self.mask_cache[key] = mask
                 mask = self.mask_cache[key]
                 mask_list.append(mask)
 
