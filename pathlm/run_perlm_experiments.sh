@@ -1,10 +1,10 @@
 for MODEL in distilgpt2 gpt2-medium gpt2-large ;
 	do
-	for HOPS in 3 ;
+	for HOPS in 3 5;
 	  do
-	  	for NPATHS in  2000 ;
+	  	for NPATHS in  250 500 1000 ;
 				do
-					for DATASET in lfm1m;
+					for DATASET in ml1m lfm1m;
 						do			
 									echo 'Running: model' $MODEL 'dataset-' $DATASET ' npaths-' $NPATHS ' hops-' $HOPS
 									pip install ../ && python3 models/lm/from_scratch_main.py --dataset $DATASET \
