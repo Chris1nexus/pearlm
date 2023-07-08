@@ -13,7 +13,7 @@ from transformers import LogitsProcessorList
 from transformers import set_seed, PreTrainedTokenizerFast
 
 from pathlm.models.lm.from_scratch_main import PERLM, PLMRec, _initialise_type_masks
-from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
+from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
