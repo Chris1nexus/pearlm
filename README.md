@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # PERLM: Faithful Path-Based Explainable Recommendation via Language
 Modeling over Knowledge Graphs
 
@@ -57,7 +56,3 @@ To train PLM-Rec:
 cd pathlm
 source run_plm-rec_experiments.sh
 ```
-=======
-
-## Usage
-
