@@ -1,5 +1,9 @@
+<<<<<<< HEAD
 # PERLM: Faithful Path-Based Explainable Recommendation via Language
 Modeling over Knowledge Graphs
+=======
+# PERLM
+>>>>>>> 5965de6ec973adeb174fbf7ff742607a86570528
 This repository contains the source code of the submitted paper "PERLM: Faithful Path-Based Explainable Recommendation via Language
 Modeling over Knowledge Graphs".
 
@@ -8,6 +12,7 @@ Modeling over Knowledge Graphs".
 
 Install the required packages:
 ```pip install -r requirements.txt```
+<<<<<<< HEAD
 Download the datasets from the drive repository
 
 ## Usage
@@ -54,3 +59,9 @@ To train PLM-Rec:
 cd pathlm
 source run_plm-rec_experiments.sh
 ```
+=======
+
+## Usage
+
+Coming soon
+>>>>>>> 5965de6ec973adeb174fbf7ff742607a86570528

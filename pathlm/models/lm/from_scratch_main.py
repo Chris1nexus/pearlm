@@ -48,7 +48,7 @@ from os.path import isfile, join
 import pandas as pd
 import math
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
-from pathlm.models.lm.trainer import PathLMTrainer
+from pathlm.models.lm.trainer import PathCLMTrainer
 
 
 
@@ -147,7 +147,7 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     tokenizer.pad_token = tokenizer.eos_token
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    trainer = PathLMTrainer(
+    trainer = PathCLMTrainer(
         dataset_name=args.dataset,
         tokenized_kg=tokenized_kg,
         n_hop=args.n_hop,
@@ -289,7 +289,7 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     tokenizer.pad_token = tokenizer.eos_token
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
-    trainer = PathLMTrainer(
+    trainer = PathCLMTrainer(
         dataset_name=args.dataset,
         tokenized_kg=tokenized_kg,
         n_hop=args.n_hop,

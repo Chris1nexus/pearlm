@@ -1,32 +1,26 @@
 import argparse
-import csv
 import os
 import pickle
 import random
 from collections import defaultdict
 from typing import List, Dict
 
-import torch
-from tqdm import tqdm
-import multiprocessing as mp
-import itertools
-import functools
 import numpy as np
-from pathlm.models.lm.from_scratch_main import DistilGPT2Pos,DistilGPT2TwoHeadModel,_initialise_type_masks
-
-from transformers import AutoTokenizer, set_seed, pipeline, PreTrainedTokenizerFast, PhrasalConstraint, \
-    AutoModelForCausalLM
+import torch
 from datasets import Dataset
+from tqdm import tqdm
+from transformers import LogitsProcessorList
+from transformers import set_seed, PreTrainedTokenizerFast
 
-from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel,PLMLogitsProcessorWordLevel
+from pathlm.models.lm.from_scratch_main import PERLM, PLMRec, _initialise_type_masks
+from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
+    PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.rl.PGPR.pgpr_utils import RELATION
 from pathlm.sampling.container.constants import TypeMapper, LiteralPath
 from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.utils import get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir,SEED
-
-from transformers import LogitsProcessorList
+from pathlm.utils import get_pid_to_eid, get_set, check_dir, SEED
 
 
 def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
@@ -350,9 +344,9 @@ if __name__ == "__main__":
         model_folder = f"model-weights/{args.dataset}/{model_folder}"
     print("Loading CKPT...")
     if 'plm-rec' in model_name:
-        model = DistilGPT2TwoHeadModel.from_pretrained(model_folder).to(args.eval_device)
+        model = PERLM.from_pretrained(model_folder).to(args.eval_device)
     else:
-        model = DistilGPT2Pos.from_pretrained(model_folder).to(args.eval_device)
+        model = PLMRec.from_pretrained(model_folder).to(args.eval_device)
 
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)
