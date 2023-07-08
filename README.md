@@ -1,6 +1,4 @@
 # PERLM: Faithful Path-Based Explainable Recommendation via Language
-Modeling over Knowledge Graphs
-
 This repository contains the source code of the submitted paper "PERLM: Faithful Path-Based Explainable Recommendation via Language
 Modeling over Knowledge Graphs".
 
