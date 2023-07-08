@@ -1,8 +1,8 @@
-for hops in 7 ;
+for hops in 3 ;
   do
-  	for npaths in  250 500 1000 ;
+  	for npaths in  2000 ;
 			do
-	  		for dataset in ml1m lfm1m;
+	  		for dataset in lfm1m;
 					do			
 						echo 'Creating: dataset-' $dataset ' npaths-' $npaths ' hops-' $hops
 						bash create_dataset.sh $dataset $npaths $hops

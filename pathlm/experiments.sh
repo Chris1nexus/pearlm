@@ -1,9 +1,8 @@
-NPROC=6
 for MODEL in distilgpt2 gpt2-medium gpt2-large ;
 	do
-	for HOPS in 3 5 ;
+	for HOPS in 3 ;
 	  do
-	  	for NPATHS in  250 500 1000 ;
+	  	for NPATHS in  2000 ;
 				do
 					for DATASET in lfm1m;
 						do			
