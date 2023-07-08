@@ -12,13 +12,13 @@ import multiprocessing as mp
 import itertools
 import functools
 import numpy as np
-from pathlm.models.lm.from_scratch_main import DistilGPT2Pos
+from pathlm.models.lm.from_scratch_main import DistilGPT2Pos,DistilGPT2TwoHeadModel,_initialise_type_masks
 
 from transformers import AutoTokenizer, set_seed, pipeline, PreTrainedTokenizerFast, PhrasalConstraint, \
     AutoModelForCausalLM
 from datasets import Dataset
 
-from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel
+from pathlm.models.lm.generation_constraints import ConstrainedLogitsProcessorWordLevel,PLMLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.rl.PGPR.pgpr_utils import RELATION
@@ -129,13 +129,20 @@ class Evaluator:
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids]}
 
         logit_processor = None
+        logit_proc_kwargs ={}
         if logit_processor_type == 'gcd':
             logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
         elif logit_processor_type == 'pgcd':
             logit_processor_cls = PrefixConstrainedLogitsProcessorWordLevel
         else:
             logit_processor_cls = PLMLogitsProcessorWordLevel 
+            ent_mask, rel_mask, token_id_to_token = _initialise_type_masks(tokenizer)
+            logit_proc_kwargs['ent_mask'] = ent_mask
+            logit_proc_kwargs['rel_mask'] = rel_mask
+            logit_proc_kwargs['token_id_to_token'] = token_id_to_token
         print('Using: ', logit_processor_cls)
+
+
         self.logits_processor = LogitsProcessorList([
             logit_processor_cls(tokenized_kg=tokenized_kg,
                                 force_token_map=self.user_negatives_token_ids,
@@ -144,7 +151,8 @@ class Evaluator:
                                 num_return_sequences=self.N_SEQUENCES_PER_USER,
                                 id_to_uid_token_map=self.id_to_uid_token_map,
                                 eos_token_ids=[
-                                self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)]
+                                self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)],
+                                **logit_proc_kwargs
                             )
         ])
 
@@ -157,7 +165,7 @@ class Evaluator:
         with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)) as pbar:
             for i in range(0, len(self.test_dataset), batch_size):
                 batch = self.test_dataset[i:i + batch_size]
-                inputs = tokenizer(batch["uid"], return_tensors='pt', add_special_tokens=False, ).to(self.eval_device)
+                inputs = self.tokenizer(batch["uid"], return_tensors='pt', add_special_tokens=False, ).to(self.eval_device)
                 outputs = model.generate(
                     **inputs,
                     max_length=self.SEQUENCE_LEN,
@@ -201,7 +209,7 @@ class Evaluator:
                 K = 10
                 count = 0
                 for sequence in sorted_sequences:
-                    sequence = tokenizer.decode(sequence).split(' ')
+                    sequence = self.tokenizer.decode(sequence).split(' ')
                     uid = sequence[1][1:]
                     if len(topk[uid]) >= K:
                         continue
@@ -332,16 +340,19 @@ if __name__ == "__main__":
     model_name = args.model
     dataset_name = args.dataset
  
-    model_folder = f"clm-{args.task}-{args.dataset}-{args.model}-{args.sample_size}-{args.n_hop}"
+    model_folder = f"clm-{args.task}-{args.dataset}-{args.model}-{args.sample_size}-{args.n_hop}-{args.logit_processor_type}"
     if args.loading_checkpoint:
-        model_folder = f"clm-{args.task}-{args.dataset}-{args.model}-{args.sample_size}-{args.n_hop}"
+        model_folder = f"clm-{args.task}-{args.dataset}-{args.model}-{args.sample_size}-{args.n_hop}-{args.logit_processor_type}"
         best_checkpoint = get_best_checkpoint(model_folder)
         model_folder = f"{model_folder}/{best_checkpoint}"
         print(f'loading: {model_folder}')
     else:
         model_folder = f"model-weights/{args.dataset}/{model_folder}"
     print("Loading CKPT...")
-    model = DistilGPT2Pos.from_pretrained(model_folder).to(args.eval_device)
+    if 'plm-rec' in model_name:
+        model = DistilGPT2TwoHeadModel.from_pretrained(model_folder).to(args.eval_device)
+    else:
+        model = DistilGPT2Pos.from_pretrained(model_folder).to(args.eval_device)
 
     tokenizer_dir = f'./tokenizers/{dataset_name}'
     os.makedirs(tokenizer_dir, exist_ok=True)

@@ -2,6 +2,13 @@ from typing import List, Dict
 from tqdm import tqdm
 from transformers import AutoTokenizer
 from pathlm.utils import get_eid_to_name_map, get_data_dir, get_pid_to_eid, get_set
+from pathlm.sampling.container.constants import LiteralPath
+from pathlm.models.rl.PGPR.pgpr_utils import RELATION
+from pathlm.sampling.container.constants import LiteralPath, TypeMapper
+from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.tools.mapper import EmbeddingMapper
+
+
 
 TOKENIZER_DIR = './tokenizers'
 
@@ -52,3 +59,102 @@ def get_user_positives(dataset_name: str) -> Dict[str, List[str]]:
     for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
         uid_positives[uid] = list(set(train_set[uid]).union(set(valid_set[uid])))
     return uid_positives
+
+
+
+
+def _initialise_type_masks(tokenizer, allow_special=False):
+    ent_mask = []
+    rel_mask = []
+    class_weight = 1
+    token_id_to_token = dict()
+    for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda x: x[1]):
+        if token[0] == LiteralPath.rel_type: #or (not token[0].isalpha() and allow_special) :
+            rel_mask.append(class_weight)
+        else:
+            rel_mask.append(0)
+        if token[0] == LiteralPath.user_type or token[0] == LiteralPath.prod_type or token[0] == LiteralPath.ent_type:# or (not token[0].isalpha() and allow_special):
+            ent_mask.append(class_weight)
+        else:
+            ent_mask.append(0)
+
+        token_id_to_token[token_id] = token
+    #print(ent_mask)
+    #print(rel_mask)
+    return ent_mask, rel_mask, token_id_to_token
+
+
+
+def _initialise_weights_from_kge(embeds, tokenizer, kg, model_config, model, args):
+    print('Using embeddings: ', args.emb_filename)
+    model_config.update({
+        'hidden_size': args.emb_size,
+        'num_attention_heads': args.emb_size // 10
+    })
+    print('ORIGINAL EMBEDDING OVERWRITTED BY TRANSE')
+    mapper = EmbeddingMapper(tokenizer, kg, embeds)
+    mapper.init_with_embedding(model.transformer.wte.weight)
+    return model, model_config
+
+
+def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
+    type_id_to_subtype_mapping = kg.dataset_info.groupwise_global_eid_to_subtype.copy()
+    rel_id2type = kg.rel_id2type.copy()
+    type_id_to_subtype_mapping[RELATION] = {int(k): v for k, v in rel_id2type.items()}
+
+    aug_kg = kg.aug_kg
+
+    token_id_to_token = dict()
+    kg_to_vocab_mapping = dict()
+    tokenized_kg = dict()
+
+    for token, token_id in tokenizer.get_vocab().items():
+        if not token[0].isalpha():
+            continue
+
+        cur_type = token[0]
+        cur_id = int(token[1:])
+
+        type = TypeMapper.mapping[cur_type]
+        subtype = type_id_to_subtype_mapping[type][cur_id]
+        if cur_type == LiteralPath.rel_type:
+            cur_id = None
+        value = token
+        if use_token_ids:
+            value = token_id
+        kg_to_vocab_mapping[(subtype, cur_id)] = token_id
+
+    for head_type in aug_kg:
+        for head_id in aug_kg[head_type]:
+            head_key = head_type, head_id
+            if head_key not in kg_to_vocab_mapping:
+                continue
+            head_ent_token = kg_to_vocab_mapping[head_key]
+            tokenized_kg[head_ent_token] = dict()
+
+            for rel in aug_kg[head_type][head_id]:
+                rel_token = kg_to_vocab_mapping[rel, None]
+                tokenized_kg[head_ent_token][rel_token] = set()
+
+                for tail_type in aug_kg[head_type][head_id][rel]:
+                    for tail_id in aug_kg[head_type][head_id][rel][tail_type]:
+                        tail_key = tail_type, tail_id
+                        if tail_key not in kg_to_vocab_mapping:
+                            continue
+                        tail_token = kg_to_vocab_mapping[tail_key]
+                        tokenized_kg[head_ent_token][rel_token].add(tail_token)
+
+    return tokenized_kg, kg_to_vocab_mapping
+
+
+def get_user_negatives(dataset_name: str) -> Dict[str, List[str]]:
+    NOT_IN_TOKENIZER = {'1871', '831', '1950', '478', '2285'}
+    data_dir = f"data/{dataset_name}"
+    ikg_ids = set(get_pid_to_eid(data_dir).values())
+    uid_negatives = {}
+    # Generate paths for the test set
+    train_set = get_set(dataset_name, set_str='train')
+    valid_set = get_set(dataset_name, set_str='valid')
+    for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
+        uid_negatives[uid] = list(set(ikg_ids - set(train_set[uid]) - set(valid_set[uid])) - NOT_IN_TOKENIZER)
+    return uid_negatives
