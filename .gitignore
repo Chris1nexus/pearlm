@@ -1,4 +1,3 @@
-data/*
 !/data/ml1m/preprocessed/*
 !/data/lfm1m/preprocessed/*
 results/*
