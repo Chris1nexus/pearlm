@@ -5,7 +5,7 @@ for MODEL in distilgpt2@plm-rec ;
 	  do
 	  	for NPATHS in  1000 ;
 				do
-					for DATASET in ml1m ; 
+					for DATASET in ml1m lfm1m ; 
 						do			
 									echo 'Running: model' $MODEL 'dataset-' $DATASET ' npaths-' $NPATHS ' hops-' $HOPS
 									pip install ../ && export CUDA_VISIBLE_DEVICES="1" && python3 models/lm/from_scratch_main.py --dataset $DATASET \
