@@ -18,7 +18,7 @@ for MODEL in distilgpt2@plm-rec ;
 									                    --emb_filename 'transe_embed.pkl' \
 									                    --emb_size 100 \
 											    		--batch_size  2048 \
-									                    --eval_device cuda:{$DEVICE_NUM} \
+									                    --eval_device cuda:$DEVICE_NUM \
 									                    --infer_batch_size 128 \
 														--logit_processor_type 'plm'
 									echo 'Completed run: model' $MODEL 'dataset-' $DATASET ' npaths-' $NPATHS ' hops-' $HOPS
