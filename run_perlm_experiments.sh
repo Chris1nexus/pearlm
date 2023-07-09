@@ -2,9 +2,9 @@ DEVICE_NUM=$1
 NPROC=6
 for MODEL in distilgpt2 gpt2-medium gpt2-large ;
 	do
-	for HOPS in 3 5;
+	for HOPS in 5 3;
 	  do
-	  	for NPATHS in  250 500 1000 ;
+	  	for NPATHS in  1000 500 250 ;
 				do
 					for DATASET in ml1m lfm1m;
 						do			
