@@ -40,9 +40,9 @@ def get_eid_to_name_map(data_dir: str) -> dict:
     f.close()
     return eid2name
 
-def set_seed(seed=SEED):
+def set_seed(seed=SEED, use_deterministic=True):
     torch.manual_seed(seed)
-    torch.use_deterministic_algorithms(True)  
+    torch.use_deterministic_algorithms(use_deterministic)
     np.random.seed(seed) 
     random.seed(seed)
 
