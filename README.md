@@ -8,7 +8,9 @@ Modeling over Knowledge Graphs".
 Install the required packages:
 ```pip install -r requirements.txt```
 
-Download the datasets from the drive repository
+Download the datasets in the **data.zip** archive from the drive repository: https://drive.google.com/drive/folders/1e0uFWb6iJ6MXHtslZsqV8qRYC0Pl_AR7?usp=sharing
+Do ```cd pathlm``` and then extract here the **data.zip**. 
+
 
 ## Usage
 ##### Design philosophy: 
