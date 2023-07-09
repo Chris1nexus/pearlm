@@ -45,11 +45,12 @@ Each bash script can be customised as desired in order to run alternative experi
 ##### PERLM
 To train PERLM, run from the top level:
 ```sh
-source run_perlm_experiments.sh
+CUDA_DEVICE_NUM=0
+source run_perlm_experiments.sh $CUDA_DEVICE_NUM
 ```
 ##### PLM-Rec
 To train PLM-Rec, run from the top level:
 ```sh
-$CUDA_DEVICE_NUM=0
+CUDA_DEVICE_NUM=0
 source run_plm-rec_experiments.sh $CUDA_DEVICE_NUM
 ```
