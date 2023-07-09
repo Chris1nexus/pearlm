@@ -825,11 +825,11 @@ def update_users(uid, user_dict, pid_to_reachable):
     return uid, reachable
 
 class KGstats:
-    def __init__(self, args, dataset_name, path, logdir='statistics', data_dir=None):
+    def __init__(self, args, dataset_name, path, save_dir='statistics', data_dir=None):
         
-        os.makedirs(logdir, exist_ok=True)
-        self.logdir = os.path.join(logdir, dataset_name)
-        os.makedirs(self.logdir, exist_ok=True)
+        os.makedirs(save_dir, exist_ok=True)
+        self.save_dir = os.path.join(save_dir, dataset_name)
+        os.makedirs(self.save_dir, exist_ok=True)
 
         self.dataset_info = Dataset(args, data_dir=data_dir)
         ptrie = PathTrie(PATH_PATTERN[dataset_name])
@@ -984,7 +984,7 @@ class KGstats:
                 items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, 
                                 USER_ENT=USER, PROD_ENT=PROD_ENT, EXT_ENT=ENTITY, 
                                 U2P_REL=U2P_REL,
-                                logdir=os.path.join(self.logdir, logdir),
+                                logdir=os.path.join(self.save_dir, logdir),
                                 user_dict=self.train_user_dict,
                                 ignore_rels=ignore_rels,
                                 max_paths=max_paths,
@@ -1262,7 +1262,7 @@ class KGstats:
             reachable_by_user_count[uid] = len(reachable_by_user)
 
         print('Avg reachable items: ', np.mean( [reachable_by_user_count[uid]  for uid in user_dict ] ))
-        with open(os.path.join(self.logdir, 'reachable_items_at_hop.json' ), 'w') as f:
+        with open(os.path.join(self.save_dir, 'reachable_items_at_hop.json' ), 'w') as f:
                 stats_dict = dict()
                 stats_dict['setup'] = {  'ignore_rels': list(ignore_rels), 'n_hop' : n_hop}
 
@@ -1329,7 +1329,7 @@ class KGstats:
 
         print('Avg reachable items (% total): ', 100/len(self.items) * np.mean( [reachable_by_user_count[uid]  for uid in user_dict ] ))
         
-        with open(os.path.join(self.logdir, 'reachable_items.json' ), 'w') as f:
+        with open(os.path.join(self.save_dir, 'reachable_items.json' ), 'w') as f:
                 stats_dict = dict()
                 stats_dict['setup'] = {  'ignore_rels': list(ignore_rels), 'n_hop' : None}
 

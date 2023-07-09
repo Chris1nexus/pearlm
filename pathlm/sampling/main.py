@@ -35,19 +35,24 @@ if __name__ == '__main__':
     ML1M = 'ml1m'
     LFM1M ='lfm1m'
     CELL='cellphones'
-    ROOT_DIR = os.environ('TREX_DATA_ROOT') if 'TREX_DATA_ROOT' in os.environ else '..'
+
+    # root dir is current directory (according to the location from where this script is run)
+    # e.g. if pathlm/sampling/main.py then ./ translates to pathlm
+    ROOT_DIR = './'
+    ROOT_DATA_DIR = os.path.join(ROOT_DIR, 'data')
+    SAVE_DIR = os.path.join(ROOT_DATA_DIR, 'sampled')
     # Dataset directories.
     DATA_DIR = {
-        ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed',
-        LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed',
-        CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed'
+        ML1M: f'{ROOT_DATA_DIR}/{ML1M}/preprocessed',
+        LFM1M: f'{ROOT_DATA_DIR}/{LFM1M}/preprocessed',
+        CELL: f'{ROOT_DATA_DIR}/{CELL}/preprocessed'
     }
     dataset_name = args.dataset#'ml1m'
     #args.dataset = dataset_name
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
     #print(dirpath)
-    data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')   
-    ml1m_kg = KGstats(args, args.dataset, dirpath,  data_dir=data_dir_mapping)
+    data_dir_mapping = os.path.join(ROOT_DATA_DIR, f'{args.dataset}/preprocessed/mapping/')   
+    kg = KGstats(args, args.dataset, dirpath,  save_dir=SAVE_DIR, data_dir=data_dir_mapping)
 
     MAX_HOP = args.max_hop
     #PROB = 0.01
@@ -65,9 +70,10 @@ if __name__ == '__main__':
     
 
     #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
-    embedding_root_dir='../embedding-weights'
+    #embedding_root_dir='../embedding-weights'
+    embedding_root_dir= os.path.join(ROOT_DIR, 'embedding-weights')
     scorer=TransEScorer(dataset_name, embedding_root_dir)
-    ml1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
+    kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
         collaborative=COLLABORATIVE,
         nproc=NPROC,
         #embedding_root_dir='../embedding-weights',
