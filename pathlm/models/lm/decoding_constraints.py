@@ -27,7 +27,7 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
-        min_score = scores.min()
+        min_score = float("-inf")
         if cur_len == self.total_length:
             num_tokens = scores.shape[1]
             scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = min_score  # float("-Inf")
@@ -36,9 +36,9 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
         else:
             mask_list = []
             for idx in range(scores.shape[0]):
+                cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
                 if cur_len % 2 == 1:
                     # parse ent -----> candidate relations
-                    cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
                     k1 = input_ids[idx, -2].item()
                     k2 = input_ids[idx, -1].item()
                     key = k1, k2
@@ -48,7 +48,12 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
                         else:
                             self.cache[key] = []
                     if cur_len == self.total_length - 1: # Remove from candidates products not in user negatives
-                        self.cache[key] = list(set(self.cache[key]).intersection(set(self.force_token_map[cur_uid])))
+                        uid_cond_key = cur_uid, *key
+                        self.cache[uid_cond_key] = list(
+                            set(self.cache[key]).intersection(set(self.force_token_map[cur_uid])))
+                        key = uid_cond_key
+                        #self.cache[key] = list(
+                        #    set(self.cache[key]).intersection(set(self.force_token_map[cur_uid])))
                 else:
                     # parse ent->rel    -----> candidates
                     k1 = input_ids[idx, -1].item()
