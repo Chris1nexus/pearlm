@@ -1,13 +1,6 @@
 import argparse
 import os
 import pickle
-from collections import defaultdict
-from typing import List, Dict
-from typing import Optional, Tuple, Union
-
-import numpy as np
-import torch
-import torch.utils.checkpoint
 from datasets import load_from_disk, DatasetDict, Dataset
 from tokenizers import (
     models,
@@ -15,20 +8,14 @@ from tokenizers import (
     processors,
     trainers,
     Tokenizer)
-from torch import nn
-from torch.nn import CrossEntropyLoss
-from tqdm import tqdm
+
 from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
     DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, LogitsProcessorList,\
     set_seed, GPT2LMHeadModel, GPT2Model, EarlyStoppingCallback
-from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
-from transformers.utils import is_torch_tpu_available
-import pandas as pd
-from os.path import join
+
 
 from pathlm.models.lm.plmrec import PLMRec
 from pathlm.models.lm.perlm import PERLM 
-from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
                     _initialise_type_masks, \
                     _initialise_weights_from_kge, \
@@ -166,8 +153,8 @@ def fine_tune(model_name: str, tokenizer, tokenized_dataset, context_length, arg
     trainer.train()
 
     # Save model
-    weight_path = f"./models-weights/{args.dataset}/{args.model}/{custom_name}"
-    check_dir(f"./models-weights/{args.dataset}/{args.model}/{custom_name}")
+    weight_path = f"./weights/models/{args.dataset}/{args.model}/{custom_name}"
+    check_dir(f"./weights/models/{args.dataset}/{args.model}/{custom_name}")
     trainer.save_model(weight_path)
     return model
 
@@ -309,8 +296,8 @@ def train_end_to_end(model_name: str, tokenizer, tokenized_dataset, context_leng
     trainer.train()
 
     # Save model
-    weight_path = f"./models-weights/{args.dataset}/{args.model}/{custom_name}"
-    check_dir(f"./models-weights/{args.dataset}/{args.model}/{custom_name}")
+    weight_path = f"./weights/models/{args.dataset}/{args.model}/{custom_name}"
+    check_dir(f"./weights/models/{args.dataset}/{args.model}/{custom_name}")
     trainer.save_model(weight_path)
     return model
 
@@ -421,8 +408,8 @@ def train_pretraining(model_name: str, tokenizer, tokenized_dataset, context_len
     trainer.train()
 
     # Save model
-    weight_path = f"./models-weights/{args.dataset}/{args.model}/{custom_name}"
-    check_dir(f"./models-weights/{args.dataset}/{args.model}/{custom_name}")
+    weight_path = f"./weights/models/{args.dataset}/{args.model}/{custom_name}"
+    check_dir(f"./weights/models/{args.dataset}/{args.model}/{custom_name}")
     trainer.save_model(weight_path)
     return model
 

@@ -15,6 +15,7 @@ from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
     _initialise_type_masks, \
     get_user_negatives, get_user_positives
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
+from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
 from pathlm.utils import get_pid_to_eid, get_set, check_dir
 
 
@@ -88,14 +89,14 @@ class PathCLMTrainer(Trainer):
                                 **logit_proc_kwargs
                                 )
         ])
-
+        self.ranker = CumulativeSequenceScoreRanker(tokenizer, user_negatives=self.user_negatives, K=10,
+                                                    max_new_tokens=self.SEQUENCE_LEN-len(init_condition_fn(0).split()))
         self.test_dataset = Dataset.from_dict(self.inference_paths)
 
     def __generate_topks_withWordLevel(self, model):
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
         batch_size = self.INFERENCE_BATCH_SIZE
-        topk = defaultdict(list)
         with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)) as pbar:
             for i in range(0, len(self.test_dataset), batch_size):
                 batch = self.test_dataset[i:i + batch_size]
@@ -116,52 +117,13 @@ class PathCLMTrainer(Trainer):
                     return_dict_in_generate=True,
                     output_scores=True,
                 )
-
-                def normalize_tuple(logits_tuple):
-                    # Normalize each tensor in the tuple
-                    normalized_tuple = tuple(torch.softmax(logits, dim=-1) for logits in logits_tuple)
-                    return normalized_tuple
-
-                def calculate_sequence_scores(normalized_tuple, sequences):
-                    # Get the last 5 tokens from each sequence
-                    last_5_tokens = sequences[:, -5:]
-                    sequence_scores = []
-                    # Iterate over each tensor in the normalized tuple
-                    for i in range(5):
-                        # Get the probabilities corresponding to the ith token in last_5_tokens
-                        probs = normalized_tuple[i].gather(1, last_5_tokens[:, i].unsqueeze(1))
-                        sequence_scores.append(probs)
-                    # Convert the list of tensors into a single tensor
-                    sequence_scores = torch.cat(sequence_scores, dim=-1)
-                    # Calculate the average score over the last 5 positions for each sequence
-                    sequence_scores = sequence_scores.mean(dim=-1)
-                    return sequence_scores
-
-                outputs.scores = normalize_tuple(outputs.scores)
-                outputs.sequences_scores = calculate_sequence_scores(outputs.scores, outputs.sequences)
-                sorted_indices = outputs.sequences_scores.argsort(descending=True)
-                sorted_sequences = outputs.sequences[sorted_indices]
-                K = 10
-
-                for sequence in sorted_sequences:
-                    sequence = self.tokenizer.decode(sequence).split(' ')
-                    # print(sequence)
-                    uid = sequence[1][1:]
-                    if len(topk[uid]) >= K:
-                        continue
-                    recommended_token = sequence[-1]
-                    recommended_item = recommended_token[1:]
-                    if not recommended_token.startswith("P"):
-                        continue
-                    if recommended_item not in self.user_negatives[uid]:
-                        continue
-                    if recommended_item in topk[uid]:
-                        continue
-                    topk[uid].append(recommended_item)
+                self.ranker.update_topk(outputs)
                 pbar.update(batch_size)
-        print("Average topk length:", sum(len(v) for v in topk.values()) / len(topk))
+        print("Average topk length:", sum(len(v) for v in self.ranker.topk.values()) / len(self.ranker.topk))
         # print("Percentage of sequence that contain invalid item:", count/len(sorted_sequences))
-        return topk
+        topks, topk_sequences = self.ranker.topk, self.ranker.topk_sequences
+        self.ranker.reset_topks()
+        return topks
 
     def evaluate(self, model):
         # Generate paths for the test users

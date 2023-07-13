@@ -93,4 +93,3 @@ def get_set(dataset_name: str, set_str: str='test') -> Dict[str, List[int]]:
             curr_set[user_id].append(item_id)
     f.close()
     return curr_set
-
