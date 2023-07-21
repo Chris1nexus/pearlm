@@ -3,6 +3,24 @@ from typing import List
 import numpy as np
 
 
+def precision_at_k(hit_list: List[int], k: int) -> float:
+    r = np.asfarray(hit_list)[:k] != 0
+    if r.size != 0:
+        return np.mean(r)
+    return 0.
+
+def recall_at_k(hit_list: List[int], k: int, test_set_len: int) -> float:
+    r = np.asfarray(hit_list)[:k] != 0
+    if r.size != 0:
+        return np.sum(r) / test_set_len
+    return 0.
+
+def F1(pre: float, rec: float) -> float:
+    if pre + rec > 0:
+        return (2.0 * pre * rec) / (pre + rec)
+    else:
+        return 0.
+
 def dcg_at_k(hit_list: List[int], k: int, method: int=1) -> float:
     r = np.asfarray(hit_list)[:k]
     if r.size:
