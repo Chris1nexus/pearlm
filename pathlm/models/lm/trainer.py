@@ -130,12 +130,13 @@ class PathCLMTrainer(Trainer):
 
     def evaluate(self, model):
         # Generate paths for the test users
-        # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
+        # This heuristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
 
         topks = self.__generate_topks_withWordLevel(model)
         results_dir = os.path.join(self.cmd_args.output_dir, self.cmd_args.experiment_model_name, 'results')
         check_dir(results_dir)#f"./results/{self.dataset_name}/{self.experiment_name}")
         pickle.dump(topks, open(os.path.join(results_dir, 'topks.pkl'), 'wb')) #f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))
+        '''
         metrics = {"ndcg": [], "mmr": [], }
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
@@ -153,9 +154,11 @@ class PathCLMTrainer(Trainer):
 
         print(
             f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+        '''
         metrics_ = dict()
-        for k in metrics:
-            metrics_[f'eval_{k}'] = np.mean(metrics[k])
+        _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)        
+        for k in avg_rec_quality_metrics:
+            metrics_[f'eval_{k}'] = np.mean(avg_rec_quality_metrics[k])
         return metrics_
 
     def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):

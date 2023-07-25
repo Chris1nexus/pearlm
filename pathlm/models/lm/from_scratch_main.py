@@ -37,7 +37,7 @@ import math
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 from pathlm.models.lm.trainer import PathCLMTrainer
 
-
+from pathlm.models.lm.evaluate_results import evaluate_rec_quality
 from datetime import datetime
 import wandb
 
@@ -161,6 +161,7 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
         logging_first_step=True,
         # use_mps_device=True,
         num_train_epochs=10,
+        max_steps=args.num_training_steps,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=250,  # number of warmup steps for learning rate
@@ -260,6 +261,11 @@ if __name__ == "__main__":
                         help="Logging interval of the losses")    
     parser.add_argument("--validation_interval", type=int, default=1000,
                         help="Validation interval")        
+
+    parser.add_argument("--num_training_steps", type=int, default=30000,
+                        help="Training steps")                                
+
+
 
     args = parser.parse_args()
 
