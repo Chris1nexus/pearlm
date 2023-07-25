@@ -20,6 +20,8 @@ def none_or_int(value):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default=LFM1M, help='One of {ml1m, lfm1m}')
+    parser.add_argument('--root_dir', type=str, default='./', help='Working directory to use to compute the datasets')
+    parser.add_argument('--data_dirname', type=str, default='data', help='Directory name to use to store the datasets')
     parser.add_argument('--max_n_paths', type=int, default=100, help='Max number of paths sampled for each user.')
     parser.add_argument('--max_hop', type=none_or_int, default=3, help='Max number of hops.')
     parser.add_argument("--itemset_type", type=str, default='inner', help="Choose whether final entity of a path is a product\nin the train interaction set of a user, outer set, or any reachable item {inner,outer,all} respectively")
@@ -38,8 +40,8 @@ if __name__ == '__main__':
 
     # root dir is current directory (according to the location from where this script is run)
     # e.g. if pathlm/sampling/main.py then ./ translates to pathlm
-    ROOT_DIR = './'
-    ROOT_DATA_DIR = os.path.join(ROOT_DIR, 'data')
+    ROOT_DIR = args.root_dir
+    ROOT_DATA_DIR = os.path.join(ROOT_DIR, args.data_dirname)
     SAVE_DIR = os.path.join(ROOT_DATA_DIR, 'sampled')
     # Dataset directories.
     DATA_DIR = {

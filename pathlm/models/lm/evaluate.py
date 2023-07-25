@@ -11,6 +11,8 @@ from datasets import Dataset
 from tqdm import tqdm
 from transformers import LogitsProcessorList
 from transformers import set_seed, PreTrainedTokenizerFast
+import wandb
+
 
 from pathlm.models.lm.from_scratch_main import PERLM, PLMRec, _initialise_type_masks
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \

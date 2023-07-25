@@ -8,6 +8,7 @@ import torch
 from datasets import Dataset
 from tqdm import tqdm
 from transformers import Trainer, LogitsProcessorList, PreTrainedTokenizerFast, is_torch_tpu_available
+import wandb
 
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
@@ -18,10 +19,10 @@ from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
 from pathlm.utils import get_pid_to_eid, get_set, check_dir
 
-
 class PathCLMTrainer(Trainer):
     def __init__(
             self,
+            cmd_args=None,
             dataset_name=None,
             n_hop=3,
             infer_batch_size=1,
@@ -36,7 +37,9 @@ class PathCLMTrainer(Trainer):
     ):
         super().__init__(**kwargs)
 
-        data_dir = f"data/{dataset_name}"
+        self.cmd_args = cmd_args
+        #data_dir = f"data/{dataset_name}"
+        data_dir = os.path.join(self.cmd_args.data_dir, dataset_name)
         model = kwargs['model']
         self.tokenizer = tokenizer
         self.dataset_name = dataset_name
@@ -130,9 +133,9 @@ class PathCLMTrainer(Trainer):
         # This euristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
 
         topks = self.__generate_topks_withWordLevel(model)
-
-        check_dir(f"./results/{self.dataset_name}/{self.experiment_name}")
-        pickle.dump(topks, open(f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))
+        results_dir = os.path.join(self.cmd_args.output_dir, self.cmd_args.experiment_model_name, 'results')
+        check_dir(results_dir)#f"./results/{self.dataset_name}/{self.experiment_name}")
+        pickle.dump(topks, open(os.path.join(results_dir, 'topks.pkl'), 'wb')) #f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))
         metrics = {"ndcg": [], "mmr": [], }
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
@@ -176,15 +179,17 @@ class PathCLMTrainer(Trainer):
         if self.control.should_evaluate and self.control.should_save:
             metrics = self.evaluate(model)
             logs.update(metrics)
+            if self.cmd_args.wandb:
+                wandb.log(logs)            
             self._report_to_hp_search(trial, self.state.global_step, metrics)
 
             # Run delayed LR scheduler now that metrics are populated
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
-                self.lr_scheduler.step(metrics[self.args.metric_for_best_model])
+                self.lr_scheduler.step(metrics[self.cmd_args.metric_for_best_model])
 
         if self.control.should_save:
             self._save_checkpoint(model, trial, metrics=metrics)
-            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+            self.control = self.callback_handler.on_save(self.cmd_args, self.state, self.control)
 
         # finish logging results
         if self.control.should_log:

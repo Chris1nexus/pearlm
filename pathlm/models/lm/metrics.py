@@ -1,7 +1,21 @@
+import csv
+import os
+import pickle
 from typing import List
 
 import numpy as np
+import pandas as pd
+NDCG = "ndcg"
+MMR = "mmr"
+SERENDIPITY = "serendipity"
+COVERAGE = "coverage"
+DIVERSITY = "diversity"
+NOVELTY = "novelty"
+CFAIRNESS = "cfairness"
+PFAIRNESS = "pfairness"
 
+REC_QUALITY_METRICS_TOPK = [NDCG, MMR, SERENDIPITY, DIVERSITY,
+                            NOVELTY, PFAIRNESS]
 
 def precision_at_k(hit_list: List[int], k: int) -> float:
     r = np.asfarray(hit_list)[:k] != 0
@@ -53,12 +67,8 @@ Beyond Accuracy
 """
     Catalog coverage https://dl.acm.org/doi/pdf/10.1145/2926720
 """
-def coverage(recommended_items_by_group, n_items_in_catalog):
-    group_metric_value = {}
-    for group, item_set in recommended_items_by_group.items():
-        group_metric_value[group] = len(item_set) / n_items_in_catalog
-    return group_metric_value
-
+def coverage(recommended_items, n_items_in_catalog):
+    return len(recommended_items) / n_items_in_catalog
 
 def serendipity_at_k(user_topk, most_pop_topk, k):
     user_topk, most_pop_topk = set(user_topk), set(most_pop_topk)
@@ -74,3 +84,53 @@ def diversity_at_k(topk_items, pid2genre):
 def novelty_at_k(topk_items, pid2popularity):
     novelty_items_topk = [1 - pid2popularity[pid] for pid in topk_items]
     return np.mean(novelty_items_topk)
+
+
+def get_dataset_id2eid(dataset_name, what="user"):
+    data_dir = os.path.join('data', dataset_name, 'preprocessed')
+    file = open(os.path.join(data_dir, f"mapping/{what}.txt"), "r")
+    csv_reader = csv.reader(file, delimiter='\t')
+    dataset_pid2eid = {}
+    next(csv_reader, None)
+    for row in csv_reader:
+        dataset_pid2eid[row[1]] = row[0]
+    file.close()
+    return dataset_pid2eid
+
+def get_result_dir(dataset_name):
+    return os.path.join('results', dataset_name)
+
+def get_item_genre(dataset_name):
+    data_dir = os.path.join('data', dataset_name, 'preprocessed')
+    dataset_id2model_kg_id = get_dataset_id2eid(dataset_name, "product")
+    dataset_id2model_kg_id = dict(zip([int(x) for x in dataset_id2model_kg_id.keys()], dataset_id2model_kg_id.values()))
+    item_genre_df = pd.read_csv(os.path.join(data_dir, "products.txt"), sep="\t")
+    item_genre_df.pid = item_genre_df.pid.map(dataset_id2model_kg_id)
+    return dict(zip(item_genre_df.pid, item_genre_df.genre))
+
+def get_mostpop_topk(dataset_name, model_name, k):
+    most_pop_dir = os.path.join('results', dataset_name, 'most_pop')
+    try:
+        with open(os.path.join(most_pop_dir, "item_topks.pkl"), 'rb') as f:
+            most_pop_topks = pickle.load(f)
+        f.close()
+    except FileNotFoundError:
+        raise FileNotFoundError("Run most_pop.py first to generate most_pop_topk.pkl")
+
+    dataset_pid2model_kg_id = get_dataset_id2eid(dataset_name, "product")
+    most_pop_topks = {uid: [dataset_pid2model_kg_id[pid] for pid in topk[:k]]
+                      for uid, topk in most_pop_topks.items()}
+    return most_pop_topks
+
+def get_item_count(dataset_name):
+    data_dir = os.path.join('data', dataset_name, 'preprocessed')
+    df_items = pd.read_csv(os.path.join(data_dir, "products.txt"), sep="\t")
+    return df_items.pid.unique().shape[0]
+
+def get_item_pop(dataset_name):
+    data_dir = os.path.join('data', dataset_name, 'preprocessed')
+    dataset_id2model_kg_id = get_dataset_id2eid(dataset_name, "product")
+    dataset_id2model_kg_id = dict(zip([int(x) for x in dataset_id2model_kg_id.keys()], dataset_id2model_kg_id.values()))
+    df_items = pd.read_csv(os.path.join(data_dir, "products.txt"), sep="\t")
+    df_items.pid = df_items.pid.map(dataset_id2model_kg_id)
+    return dict(zip(df_items.pid, df_items.pop_item))

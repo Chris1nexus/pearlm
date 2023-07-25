@@ -43,7 +43,7 @@ def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
         value = token
         if use_token_ids:
             value = token_id
-        kg_to_vocab_mapping[(subtype, cur_id)] = token_id
+        kg_to_vocab_mapping[(subtype, cur_id)] = value
 
     for head_type in aug_kg:
         for head_id in aug_kg[head_type]:
