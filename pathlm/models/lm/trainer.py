@@ -19,6 +19,8 @@ from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
 from pathlm.utils import get_pid_to_eid, get_set, check_dir
 
+from pathlm.models.lm.evaluate_results import evaluate_rec_quality
+
 class PathCLMTrainer(Trainer):
     def __init__(
             self,

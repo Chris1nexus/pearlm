@@ -37,7 +37,6 @@ import math
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 from pathlm.models.lm.trainer import PathCLMTrainer
 
-from pathlm.models.lm.evaluate_results import evaluate_rec_quality
 from datetime import datetime
 import wandb
 
