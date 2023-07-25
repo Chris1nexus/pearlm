@@ -12,6 +12,8 @@ from collections import Counter
 
 NDCG = "ndcg"
 MMR = "mmr"
+PRECISION = 'precision'
+RECALL = 'recall'
 SERENDIPITY = "serendipity"
 COVERAGE = "coverage"
 DIVERSITY = "diversity"
@@ -19,7 +21,8 @@ NOVELTY = "novelty"
 CFAIRNESS = "cfairness"
 PFAIRNESS = "pfairness"
 
-REC_QUALITY_METRICS_TOPK = [NDCG, MMR, SERENDIPITY, DIVERSITY,
+
+REC_QUALITY_METRICS_TOPK = [NDCG, MMR, PRECISION, RECALL, SERENDIPITY, DIVERSITY,
                             NOVELTY, PFAIRNESS]
 
 def precision_at_k(hit_list: List[int], k: int) -> float:
