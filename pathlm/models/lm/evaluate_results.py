@@ -80,7 +80,7 @@ def evaluate_rec_quality(dataset_name, topk_items, test_labels, k=10):
         avg_rec_quality_metrics[metric] = avg_value
     # Compute global metrics
     # Print results
-    print_rec_quality_metrics(avg_rec_quality_metrics)
+    #print_rec_quality_metrics(avg_rec_quality_metrics)
     #print(generate_latex_row(args.model, avg_rec_quality_metrics, "rec"))
     # Save as csv if specified
     return rec_quality_metrics, avg_rec_quality_metrics

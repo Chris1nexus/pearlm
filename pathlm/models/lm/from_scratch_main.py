@@ -261,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--validation_interval", type=int, default=1000,
                         help="Validation interval")        
 
-    parser.add_argument("--num_training_steps", type=int, default=30000,
+    parser.add_argument("--num_training_steps", type=int, default=60000,
                         help="Training steps")                                
 
 
