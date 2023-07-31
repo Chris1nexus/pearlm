@@ -825,6 +825,7 @@ def update_users(uid, user_dict, pid_to_reachable):
     return uid, reachable
 
 class KGstats:
+    TOKEN_INDEX_FILE = 'token_index.txt'
     def __init__(self, args, dataset_name, path, save_dir='statistics', data_dir=None):
         
         os.makedirs(save_dir, exist_ok=True)
@@ -836,6 +837,7 @@ class KGstats:
         self.ptrie = ptrie
 
         self.kg2t = KG_RELATION[dataset_name]
+        self.token_index_filepath = os.path.join(path, KGstats.TOKEN_INDEX_FILE)
         
         self.dataset_name = dataset_name
         print('Loading from ', path, ' the dataset ', dataset_name)
@@ -874,6 +876,7 @@ class KGstats:
         self.graph_level_stats()
         #self.load_augmented_kg()
         self.load_augmented_kg_V2()
+        
     def graph_level_stats(self):
         self.n_relations, self.n_entities, self.n_triples = 0, 0, 0
         self.n_relations = max(self.kg_np[:, 1]) + 1
@@ -935,6 +938,44 @@ class KGstats:
                 kg[t][r].add(h)
             
         return kg, kg_np
+    def build_token_index(self):
+
+        aug_kg = self.aug_kg
+        REL_TYPE2ID=self.rel_type2id
+        kg_tokens = set()
+
+        def get_token_ent_type(ent_type):
+            token_type = None
+            if ent_type == USER:
+                token_type = LiteralPath.user_type
+            elif ent_type == PRODUCT:
+                token_type = LiteralPath.prod_type
+            else:
+                token_type = LiteralPath.ent_type
+            return token_type
+
+        for head_type in aug_kg:
+
+            h_token_type = get_token_ent_type(head_type)
+
+            for head_id in aug_kg[head_type]:
+                head_token = f'{h_token_type}{head_id}'
+                kg_tokens.add(head_token)
+                for rel in aug_kg[head_type][head_id]:
+                    rel_id = REL_TYPE2ID[rel]
+                    rel_token = f'{LiteralPath.rel_type}{rel_id}'
+                    kg_tokens.add(rel_token)
+                    for tail_type in aug_kg[head_type][head_id][rel]:
+                        t_token_type = get_token_ent_type(tail_type)
+                        for tail_id in aug_kg[head_type][head_id][rel][tail_type]:
+                            tail_token = f'{t_token_type}{tail_id}'
+                            kg_tokens.add(tail_token)
+        with open(self.token_index_filepath, 'w') as f:
+            for token in kg_tokens:
+                f.write(token + '\n')
+                
+        
+    
 
 
     def random_walk_sampler(self, ignore_rels=set(), max_hop=None, max_paths=4000, logdir='paths_rand_walk',itemset_type='inner', 
@@ -1465,6 +1506,9 @@ class KGstats:
                     self.aug_kg[PROD_ENT][h1][R2T[rel]][TAIL_ENT].append( t1   )
                     self.aug_kg[TAIL_ENT][t1][R2T[rel]][PROD_ENT].append( h1   )
         print('Created augmented kg')              
+        print('Creating token index')
+        self.build_token_index()
+        print('Created token index')
 '''
 
     def reachable_items_constrained(self, n_hop=None ):

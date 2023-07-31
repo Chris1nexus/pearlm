@@ -1,10 +1,10 @@
 DEVICE_NUM=$1
 NPROC=6
-for MODEL in gpt2@plm-rec  distilgpt2@plm-rec ;
+for MODEL in gpt2@plm-rec  ;
 	do
 	for HOPS in 5 3 ;
-	  do
-	  	for NPATHS in  1000 500 250 ;
+		do
+	  	for NPATHS in  250 500 1000 10000 3000 ;
 				do
 					for DATASET in  ml1m lfm1m ; 
 						do			
@@ -16,7 +16,7 @@ for MODEL in gpt2@plm-rec  distilgpt2@plm-rec ;
 									                    --n_hop $HOPS \
 									                    --emb_filename 'transe_embed.pkl' \
 									                    --emb_size 100 \
-											    		--batch_size  2048 \
+											    		--batch_size  1024 \
 									                    --eval_device cuda:0 \
 									                    --infer_batch_size 128 \
 														--logit_processor_type 'plm' \

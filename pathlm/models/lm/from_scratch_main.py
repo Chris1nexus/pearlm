@@ -55,7 +55,7 @@ def tokenize_function(examples: str, context_length: int = 200):
     return tokenizer(examples["path"], truncation=True, padding=True, max_length=context_length)
 
 
-def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace):
+def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: argparse.Namespace, kg):
     ent_mask, rel_mask, token_id_to_token = _initialise_type_masks(tokenizer)
     config_kwargs = {
         'vocab_size': len(tokenizer),
@@ -121,14 +121,7 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
 
     model = model_cls(config)
 
-    #ROOT_DIR = os.environ('PLM_ROOT') if 'PLM_ROOT' in os.environ else '.'
-    
     RESULT_DIR = args.output_dir
-    # Dataset directories.
-    dirpath = f'{args.data_dir}/{args.dataset}/preprocessed'
-
-    data_dir_mapping = os.path.join(args.data_dir, f'{args.dataset}/preprocessed/mapping/')
-    kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
 
     if embeds:
         mapper = EmbeddingMapper(tokenizer, kg, embeds)      
@@ -271,7 +264,7 @@ if __name__ == "__main__":
     set_seed(SEED)
 
 
-    project_name = f'from_scratch_llm_v2@{args.dataset}'
+    project_name = f'from_scratch_llm_v3@{args.dataset}'
     run_name=f"{args.exp_name}@{args.dataset}@{args.model}@{args.n_hop}@{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     log_dir = os.path.join(project_name, run_name)
     os.makedirs(log_dir, exist_ok=True)
@@ -306,11 +299,17 @@ if __name__ == "__main__":
     os.makedirs(tokenizer_dir, exist_ok=True)
     tokenizer_file = os.path.join(tokenizer_dir, f"{TOKENIZER_TYPE}.json")
 
+    dirpath = f'{args.data_dir}/{args.dataset}/preprocessed'
+    data_dir_mapping = os.path.join(args.data_dir, f'{args.dataset}/preprocessed/mapping/')
+    kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+
+
     sample_size = args.sample_size
     dataset_hop_size = args.n_hop
     TOKENIZED_DATASET_PATH = os.path.join(args.data_dir, f"{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
+    TOKEN_INDEX_PATH = os.path.join(dirpath, KGstats.TOKEN_INDEX_FILE)
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
-    if args.load_data and os.path.exists(TOKENIZED_DATASET_PATH):
+    if args.load_data and os.path.exists(TOKENIZED_DATASET_PATH) and os.path.exists(tokenizer_file):
         task = args.task
         tokenized_dataset = load_from_disk(
             TOKENIZED_DATASET_PATH)
@@ -329,29 +328,35 @@ if __name__ == "__main__":
         dataset.show_random_examples()
         dataset = dataset.dataset
         print(type(dataset))
-        if not os.path.exists(tokenizer_file):
-            # Word level tokenizer
-            print("Training tokenizer...")
-            tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
-            special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
-            tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
-            trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
-            tokenizer.train_from_iterator(dataset["path"], trainer=trainer)
-            tokenizer.post_processor = processors.TemplateProcessing(
-                single="[BOS]:0 $A:0 [EOS]:0",
-                special_tokens=[("[BOS]", tokenizer.token_to_id("[BOS]")), ("[EOS]", tokenizer.token_to_id("[EOS]"))]
-            )
+        #if not os.path.exists(tokenizer_file):
+        # Word level tokenizer
+        print("Training tokenizer...")
+        tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
+        special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
+        tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+        trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
 
-            tokenizer.save(tokenizer_file)
-            tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
-                                                eos_token="[EOS]", bos_token="[BOS]",
-                                                pad_token="[PAD]", unk_token="[UNK]",
-                                                mask_token="[MASK]", use_fast=True)
-        else:
-            tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
-                                                eos_token="[EOS]", bos_token="[BOS]",
-                                                pad_token="[PAD]", unk_token="[UNK]",
-                                                mask_token="[MASK]", use_fast=True)
+        tokens = []
+        with open(TOKEN_INDEX_PATH) as f:
+            for line in f:
+                tokens.append(line.rstrip())
+        tokenizer.train_from_iterator(tokens, #dataset["path"], 
+                                        trainer=trainer)
+        tokenizer.post_processor = processors.TemplateProcessing(
+            single="[BOS]:0 $A:0 [EOS]:0",
+            special_tokens=[("[BOS]", tokenizer.token_to_id("[BOS]")), ("[EOS]", tokenizer.token_to_id("[EOS]"))]
+        )
+
+        tokenizer.save(tokenizer_file)
+        tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
+                                            eos_token="[EOS]", bos_token="[BOS]",
+                                            pad_token="[PAD]", unk_token="[UNK]",
+                                            mask_token="[MASK]", use_fast=True)
+        #else:
+        #    tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
+        #                                        eos_token="[EOS]", bos_token="[BOS]",
+        #                                        pad_token="[PAD]", unk_token="[UNK]",
+        #                                        mask_token="[MASK]", use_fast=True)
 
         if args.task == "pretrain":
             # Load the specified tokenizer
@@ -389,7 +394,7 @@ if __name__ == "__main__":
         model = AutoModelForCausalLM.from_pretrained(
             custom_name)  
     else:
-        model = train(model_name, tokenizer, tokenized_dataset, args.context_length, args)
+        model = train(model_name, tokenizer, tokenized_dataset, args.context_length, args, kg)
         '''
         if args.task == "pretrain":
             model = train_pretraining(model_name, tokenizer, tokenized_dataset, args.context_length, args)
