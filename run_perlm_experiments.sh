@@ -1,6 +1,6 @@
 DEVICE_NUM=$1
 NPROC=6
-for MODEL in gpt2-large gpt2 distilgpt2  ;
+for MODEL in gpt2 distilgpt2  ;
 	do
 	for HOPS in 5 3 ;
 		do
@@ -15,7 +15,7 @@ for MODEL in gpt2-large gpt2 distilgpt2  ;
 									                    --nproc $NPROC \
 									                    --n_hop $HOPS \
 											    		--batch_size  128 \
-									                    --infer_batch_size 64 \
+									                    --infer_batch_size 128 \
 									                    --eval_device cuda:0 \
 														--logit_processor_type 'gcd'	\
 														--num_training_steps 60000 \
