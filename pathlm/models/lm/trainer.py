@@ -2,14 +2,13 @@ import os
 import pickle
 from collections import defaultdict
 from typing import Dict
-
+import time
 import numpy as np
 import torch
 from datasets import Dataset
 from tqdm import tqdm
 from transformers import Trainer, LogitsProcessorList, PreTrainedTokenizerFast, is_torch_tpu_available
 import wandb
-
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
@@ -20,6 +19,8 @@ from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
 from pathlm.utils import get_pid_to_eid, get_set, check_dir
 
 from pathlm.models.lm.evaluate_results import evaluate_rec_quality
+
+
 
 class PathCLMTrainer(Trainer):
     def __init__(
@@ -102,11 +103,13 @@ class PathCLMTrainer(Trainer):
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
         batch_size = self.INFERENCE_BATCH_SIZE
+        topk = defaultdict(list)
         with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)) as pbar:
             for i in range(0, len(self.test_dataset), batch_size):
                 batch = self.test_dataset[i:i + batch_size]
                 inputs = self.tokenizer(batch["uid"], return_tensors='pt', add_special_tokens=False, ).to(
                     self.eval_device)
+
                 outputs = model.generate(
                     **inputs,
                     max_length=self.SEQUENCE_LEN,
@@ -123,11 +126,12 @@ class PathCLMTrainer(Trainer):
                     output_scores=True,
                 )
                 self.ranker.update_topk(outputs)
-                pbar.update(batch_size)
+                pbar.update(batch_size)                  
         print("Average topk length:", sum(len(v) for v in self.ranker.topk.values()) / len(self.ranker.topk))
         # print("Percentage of sequence that contain invalid item:", count/len(sorted_sequences))
-        topks, topk_sequences = self.ranker.topk, self.ranker.topk_sequences
+        topks = self.ranker.topk
         self.ranker.reset_topks()
+           
         return topks
 
     def evaluate(self, model):
