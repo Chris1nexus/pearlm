@@ -121,7 +121,7 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
             #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
 
-
+'''
 class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
                  id_to_uid_token_map, eos_token_ids, mask_cache_size=3*10**4, cand_cache_size=1*10**5, **kwargs):
@@ -195,7 +195,7 @@ class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
             scores = masked_scores 
             #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
-
+'''
 
 class PLMLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
@@ -229,7 +229,7 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
             for i in self.eos_token_ids: 
                 scores[:, i] = 0.
         else:
-            mask = torch.full_like(scores, -math.inf)
+            mask = torch.full_like(scores, -math.inf).to(scores.device)
             for idx in range(scores.shape[0]):
                 cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
                 if cur_len % 2 == 1:
@@ -250,6 +250,7 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
                 #mask[idx, candidate_tokens] = 0.
                 mask[idx, candidate_tokens] = scores[idx, candidate_tokens]
             #scores = scores + mask
+            scores = mask
         '''
         min_score = scores.min()
         if cur_len == self.total_length:
