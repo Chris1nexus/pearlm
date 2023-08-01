@@ -18,7 +18,7 @@ for MODEL in gpt2  ;
 									                    --infer_batch_size 128 \
 									                    --eval_device cuda:0 \
 														--logit_processor_type 'gcd'	\
-														--num_training_steps 60000 \
+														--num_training_steps 100000 \
 														--validation_interval 3000 \
 														--wandb 	
 														#--load_data True \

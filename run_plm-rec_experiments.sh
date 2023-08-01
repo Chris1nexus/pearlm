@@ -16,7 +16,7 @@ for MODEL in gpt2@plm-rec  ;
 									                    --n_hop $HOPS \
 									                    --emb_filename 'transe_embed.pkl' \
 									                    --emb_size 100 \
-											    		--batch_size  1024 \
+											    		--batch_size  256 \
 									                    --eval_device cuda:0 \
 									                    --infer_batch_size 128 \
 														--logit_processor_type 'plm' \
