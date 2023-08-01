@@ -263,7 +263,7 @@ if __name__ == "__main__":
     set_seed(SEED)
 
 
-    project_name = f'from_scratch_llm_v3@{args.dataset}'
+    project_name = f'from_scratch_llm_v4@{args.dataset}'
     run_name=f"{args.exp_name}@{args.dataset}@{args.model}@{args.n_hop}@{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     log_dir = os.path.join(project_name, run_name)
     os.makedirs(log_dir, exist_ok=True)
