@@ -21,6 +21,7 @@ for MODEL in gpt2@plm-rec  ;
 									                    --infer_batch_size 128 \
 														--logit_processor_type 'plm' \
 														--num_training_steps 60000 \
+														--validation_interval 3000 \
 														--wandb
 									echo 'Completed run: model' $MODEL 'dataset-' $DATASET ' npaths-' $NPATHS ' hops-' $HOPS
 									echo
