@@ -121,7 +121,7 @@ class ConstrainedLogitsProcessorWordLevel(LogitsProcessor):
             #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
 
-'''
+#'''
 class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
                  id_to_uid_token_map, eos_token_ids, mask_cache_size=3*10**4, cand_cache_size=1*10**5, **kwargs):
@@ -195,7 +195,7 @@ class PrefixConstrainedLogitsProcessorWordLevel(LogitsProcessor):
             scores = masked_scores 
             #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
-'''
+#'''
 
 class PLMLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
@@ -280,7 +280,7 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
                 mask_list.append(mask)
 
             mask = np.vstack(mask_list)
-            scores[~mask] = min_score
+            scores[~mask] = min_scorea
         '''
         #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
