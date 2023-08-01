@@ -181,7 +181,9 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
         train_dataset=tokenized_dataset["train"],
         experiment_name=args.experiment_model_name,
         logit_processor_type=args.logit_processor_type,
-        data_collator=data_collator)
+        data_collator=data_collator,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
+        )
 
     # Train model
     trainer.train()
