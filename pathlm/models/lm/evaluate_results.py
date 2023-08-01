@@ -41,38 +41,39 @@ def evaluate_rec_quality(dataset_name, topk_items, test_labels, k=10):
     # Serendipity
     mostpop_topk = get_mostpop_topk(dataset_name, k)
     recommended_items_all_user_set = set()
-    pbar = tqdm(desc="Evaluating rec quality", total=len(topk_items.keys()))
+    #pbar = tqdm(desc="Evaluating rec quality", total=len(topk_items.keys()))
     # Evaluate recommendation quality for users' topk
-    for uid, topk in topk_items.items():
-        hits = []
-        for pid in topk[:k]:
-            hits.append(1 if pid in test_labels[uid] else 0)
-        # If the model has predicted less than 10 items pad with zeros
-        while len(hits) < k:
-            hits.append(0)
-        for metric in REC_QUALITY_METRICS_TOPK:
-            if len(topk) == 0:
-                metric_value = 0.0
-            else:
-                if metric == NDCG:
-                    metric_value = ndcg_at_k(hits, k)
-                if metric == MMR:
-                    metric_value = mmr_at_k(hits, k)
-                if metric == PRECISION:
-                    metric_value = precision_at_k(hits, k) 
-                if metric == RECALL:
-                    test_set_len = max(max(1,len(topk)),  len(test_labels[uid]) )
-                    metric_value = recall_at_k(hits, k,  test_set_len )                                       
-                if metric == SERENDIPITY:
-                    metric_value = serendipity_at_k(topk, mostpop_topk[uid], k)
-                if metric == DIVERSITY:
-                    metric_value = diversity_at_k(topk, pid2genre)
-                if metric == NOVELTY:
-                    metric_value = novelty_at_k(topk, pid2popularity)
-            rec_quality_metrics[metric].append(metric_value)
-        # For coverage
-        recommended_items_all_user_set.update(set(topk))
-        pbar.update(1)
+    with tqdm(desc="Evaluating rec quality", total=len(topk_items.keys())) as pbar:
+        for uid, topk in topk_items.items():
+            hits = []
+            for pid in topk[:k]:
+                hits.append(1 if pid in test_labels[uid] else 0)
+            # If the model has predicted less than 10 items pad with zeros
+            while len(hits) < k:
+                hits.append(0)
+            for metric in REC_QUALITY_METRICS_TOPK:
+                if len(topk) == 0:
+                    metric_value = 0.0
+                else:
+                    if metric == NDCG:
+                        metric_value = ndcg_at_k(hits, k)
+                    if metric == MMR:
+                        metric_value = mmr_at_k(hits, k)
+                    if metric == PRECISION:
+                        metric_value = precision_at_k(hits, k) 
+                    if metric == RECALL:
+                        test_set_len = max(max(1,len(topk)),  len(test_labels[uid]) )
+                        metric_value = recall_at_k(hits, k,  test_set_len )                                       
+                    if metric == SERENDIPITY:
+                        metric_value = serendipity_at_k(topk, mostpop_topk[uid], k)
+                    if metric == DIVERSITY:
+                        metric_value = diversity_at_k(topk, pid2genre)
+                    if metric == NOVELTY:
+                        metric_value = novelty_at_k(topk, pid2popularity)
+                rec_quality_metrics[metric].append(metric_value)
+            # For coverage
+            recommended_items_all_user_set.update(set(topk))
+            pbar.update(1)
     avg_rec_quality_metrics[COVERAGE] = coverage(recommended_items_all_user_set, n_items_in_catalog)
     # Compute average values for metrics
     for metric, values in rec_quality_metrics.items():

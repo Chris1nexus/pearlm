@@ -133,8 +133,9 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
     trainer_logging_root = os.path.join(logging_root, 'train_checkpoints')
     check_dir(trainer_logging_root)
 
-    STEP_INTERVAL = args.logging_interval
     EVAL_STEP_INTERVAL = args.validation_interval
+    STEP_INTERVAL = min(args.logging_interval, args.validation_interval)
+    
     # Training arguments for Causal Language Model task
     training_args = TrainingArguments(
         trainer_logging_root, #args.experiment_model_name,#f"clm-{custom_name}",

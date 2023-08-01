@@ -19,6 +19,9 @@ class CumulativeSequenceScoreRanker():
         self.sequence_scorer_fnc = self.calculate_sequence_scores
 
     def calculate_sequence_scores(self, normalized_tuple, sequences):
+        #print('aaaa')
+        #print(sequences.shape, self.max_new_tokens)
+        #print(len(normalized_tuple), normalized_tuple[0].shape)
         last_5_tokens = sequences[:, -self.max_new_tokens:]
         sequence_scores = []
         # Iterate over each tensor in the normalized tuple                                                                             
@@ -58,5 +61,7 @@ class CumulativeSequenceScoreRanker():
             self.topk_sequences[uid].append(sequence)
 
     def reset_topks(self):
+        del self.topk
+        del self.topk_sequences
         self.topk = defaultdict(list)
         self.topk_sequences = defaultdict(list)

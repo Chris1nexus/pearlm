@@ -2,7 +2,7 @@ DEVICE_NUM=$1
 NPROC=6
 for MODEL in distilgpt2  ;
 	do
-	for HOPS in 5  ;
+	for HOPS in 3  ;
 		do
 	  	for NPATHS in  250  ;
 				do
@@ -19,8 +19,8 @@ for MODEL in distilgpt2  ;
 									                    --eval_device cuda:0 \
 														--logit_processor_type 'gcd'	\
 														--num_training_steps 60000 \
-														--validation_interval 1000 \
-														--wandb 		
+														--validation_interval 10 \
+														--wandb 	
 														#--load_data True \
 																				                    
 									echo 'Completed run: model' $MODEL 'dataset-' $DATASET ' npaths-' $NPATHS ' hops-' $HOPS
