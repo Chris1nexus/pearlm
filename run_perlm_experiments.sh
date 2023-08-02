@@ -1,8 +1,8 @@
 DEVICE_NUM=$1
-NPROC=2
-for MODEL in gpt2  distilgpt2 ;
+NPROC=1
+for HOPS in 3 5 ;
 	do
-	for HOPS in 3 5 ;
+	for MODEL in gpt2  distilgpt2 ;
 		do
 	  	for NPATHS in 250 500 1000 2000 3000 ;
 				do
