@@ -149,8 +149,8 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
         fp16=True,#True,
         logging_first_step=True,
         # use_mps_device=True,
-        num_train_epochs=10,
-        max_steps=args.num_training_steps,
+        num_train_epochs=args.num_epochs,
+        #max_steps=args.num_training_steps,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.test_batch_size,
         warmup_steps=250,  # number of warmup steps for learning rate
@@ -253,8 +253,10 @@ if __name__ == "__main__":
     parser.add_argument("--validation_interval", type=int, default=1000,
                         help="Validation interval")        
 
-    parser.add_argument("--num_training_steps", type=int, default=60000,
-                        help="Training steps")                                
+    parser.add_argument("--num_epochs", type=int, default=20,
+                        help="Number of epochs")     
+    #parser.add_argument("--num_training_steps", type=int, default=60000,
+    #                    help="Training steps")                                
 
 
 
@@ -263,7 +265,7 @@ if __name__ == "__main__":
     set_seed(SEED)
 
 
-    project_name = f'from_scratch_llm_v4@{args.dataset}'
+    project_name = f'from_scratch_llm_v5@{args.dataset}'
     run_name=f"{args.exp_name}@{args.dataset}@{args.model}@{args.n_hop}@{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     log_dir = os.path.join(project_name, run_name)
     os.makedirs(log_dir, exist_ok=True)
