@@ -3,11 +3,11 @@ import argparse
 import torch
 import torch.optim as optim
 
-from pathlm.datasets.kg_dataset import KARSDataset
+from pathlm.datasets.kg_dataset_base import KARSDataset
+from pathlm.knowledge_graphs.kg_macros import ML1M, LFM1M, CELL
 from pathlm.models.embeddings.kge_data_loader import KGEDataLoader
-from pathlm.models.embeddings.kge_utils import ML1M, get_log_dir, get_logger, get_embedding_ckpt_rootdir
+from pathlm.models.embeddings.kge_utils import get_log_dir, get_logger, get_embedding_ckpt_rootdir
 from pathlm.models.embeddings.transe_model import TransE
-
 from pathlm.utils import set_seed
 
 logger = None
@@ -50,7 +50,7 @@ def train(args, dataset):
                             'Lr: {:.5f} | '.format(lr) +
                             'Smooth loss: {:.5f}'.format(smooth_loss))
                 smooth_loss = 0.0
-        if epoch % 10 == 0:
+        if epoch % 10 == 0 or epoch == 1:
             torch.save(model.state_dict(), f'{EMBEDDING_CKPT_DIR}/transe_model_sd_epoch_{epoch}.ckpt')
 
     return model
@@ -75,6 +75,7 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     args.device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
         else 'cpu')  )
+    args.device = 'cpu'
     #print(TMP_DIR[args.dataset])
     #args.log_dir = os.path.join(TMP_DIR[args.dataset], args.name)
     log_dir = get_log_dir(args.dataset, args.name)

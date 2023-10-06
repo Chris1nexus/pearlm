@@ -1,9 +1,10 @@
 import numpy as np
 import torch
 import torch.nn as nn
+
+from pathlm.knowledge_graphs.kg_macros import USER, INTERACTION, PRODUCT
 from pathlm.models.embeddings.kge_abstract import KnowledgeGraphEmbedding
-from pathlm.models.embeddings.kge_utils import TRANSE, get_knowledge_derived_relations, INTERACTION, PRODUCT, USER, \
-    save_embed, get_embedding_ckpt_rootdir
+from pathlm.models.embeddings.kge_utils import TRANSE, get_knowledge_derived_relations, save_embed, get_embedding_ckpt_rootdir
 
 
 class TransE(KnowledgeGraphEmbedding):

@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 import torch.nn as nn
 from easydict import EasyDict as edict
 
-from pathlm.models.embeddings.kge_utils import INTERACTION, PRODUCT
+from pathlm.knowledge_graphs.kg_macros import INTERACTION, PRODUCT
 
 
 class KnowledgeGraphEmbedding(nn.Module):
