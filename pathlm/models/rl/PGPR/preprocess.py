@@ -1,35 +1,24 @@
-from __future__ import absolute_import, division, print_function
-
-import os
 import gzip
+import os
 import argparse
 
-import pandas as pd
 
-# from pgpr_utils.py import *
-from pathlm.models.rl.PGPR.data_utils import Dataset
-from pathlm.models.rl.PGPR.knowledge_graph import KnowledgeGraph
-from pathlm.models.rl.PGPR.pgpr_utils import DATASET_DIR, save_labels, ML1M, TMP_DIR, save_dataset, load_dataset, save_kg
+from pathlm.datasets.kg_dataset_base import KARSDataset
+from pathlm.evaluation.eval_utils import get_set
+from pathlm.knowledge_graphs.pgpr_kg import PGPRKnowledgeGraph
+from pathlm.models.rl.PGPR.pgpr_utils import TMP_DIR, save_dataset, load_dataset, save_kg, \
+    save_labels, DATASET_INFO_DIR
 
 
-def generate_labels(dataset, mode='train'):
-    review_file = f"{DATASET_DIR[dataset]}/{mode}.txt.gz"
-    user_products = {}  # {uid: [pid,...], ...}
-    with gzip.open(review_file, 'r') as f:
-        for line in f:
-            line = line.decode('utf-8').strip()
-            arr = line.split('\t')
-            user_idx = int(arr[0])
-            product_idx = int(arr[1])
-            if user_idx not in user_products:
-                user_products[user_idx] = []
-            user_products[user_idx].append(product_idx)
+def generate_labels(dataset: str, mode: str='train') -> None:
+    #USE GET_SET() FUNCTION AND CHEKC THAT IDS ARE CORRECT IN THE PIPE
+    user_products = get_set(dataset, mode)
+    user_products = {int(k): [int(v) for v in user_products[k]] for k in user_products}
     save_labels(dataset, user_products, mode=mode)
-
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', type=str, default="lfm1m", help='ML1M')
+    parser.add_argument('--dataset', type=str, default="ml1m", help='ML1M')
     args = parser.parse_args()
 
     # Create AmazonDataset instance for dataset.
@@ -37,13 +26,13 @@ def main():
     print('Load', args.dataset, 'dataset from file...')
     if not os.path.isdir(TMP_DIR[args.dataset]):
         os.makedirs(TMP_DIR[args.dataset])
-    dataset = Dataset(args)
+    dataset = KARSDataset(args)
     save_dataset(args.dataset, dataset)
     # Generate knowledge graph instance.
     # ========== BEGIN ========== #
     print('Create', args.dataset, 'knowledge graph from dataset...')
     dataset = load_dataset(args.dataset)
-    kg = KnowledgeGraph(dataset)
+    kg = PGPRKnowledgeGraph(dataset)
     kg.compute_degrees()
     save_kg(args.dataset, kg)
     # =========== END =========== #

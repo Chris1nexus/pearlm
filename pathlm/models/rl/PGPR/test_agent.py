@@ -1,105 +1,19 @@
-from __future__ import absolute_import, division, print_function
-
-import os
 import argparse
 from math import log
-import numpy as np
-import torch
-import json
-from easydict import EasyDict as edict
 from tqdm import tqdm
 from functools import reduce
 import warnings
+
+from pathlm.evaluation.eval_utils import save_topks_items_results, save_topks_paths_results
+from pathlm.knowledge_graphs.kg_macros import SELF_LOOP, USER
+from pathlm.knowledge_graphs.kg_utils import KG_RELATION, MAIN_PRODUCT_INTERACTION
+from pathlm.evaluation.eval_metrics import evaluate_rec_quality
+from pathlm.models.embeddings.kge_utils import load_embed
 
 from pathlm.models.rl.PGPR.kg_env import BatchKGEnvironment
 from pathlm.models.rl.PGPR.train_agent import ActorCritic
 from pathlm.models.rl.PGPR.pgpr_utils import *
 warnings.filterwarnings("ignore", category=DeprecationWarning)   
-
-def evaluate(dataset_name, topk_matches, test_user_products):
-    """Compute metrics for predicted recommendations.
-    Args:
-        topk_matches: a list or dict of product ids in ascending order.
-    """
-    invalid_users = []
-    # Compute metrics
-    metrics = edict(
-        # ndcg_other=[],
-        ndcg=[],
-        hr=[],
-        precision=[],
-        recall=[],
-
-    )
-    ndcgs = []
-    # uid2gender, gender2name = get_user2gender(dataset_name)
-    test_user_idxs = list(test_user_products.keys())
-    rel_size = []
-    for uid in test_user_idxs:
-        if uid not in topk_matches or len(topk_matches[uid]) < 10:
-            invalid_users.append(uid)
-            continue
-        pred_list, rel_set = topk_matches[uid][::-1], test_user_products[uid]
-        if len(pred_list) == 0:
-            continue
-        rel_size.append(len(rel_set))
-        k = 0
-        hit_num = 0.0
-        hit_list = []
-        for pid in pred_list:
-            k += 1
-            if pid in rel_set:
-                hit_num += 1
-                hit_list.append(1)
-            else:
-                hit_list.append(0)
-
-        ndcg = ndcg_at_k(hit_list, k)
-        recall = hit_num / len(rel_set)
-        precision = hit_num / len(pred_list)
-        hit = 1.0 if hit_num > 0.0 else 0.0
-        # General
-        # metrics.ndcg_other.append(ndcg_other)
-        metrics.ndcg.append(ndcg)
-        metrics.hr.append(hit)
-        metrics.recall.append(recall)
-        metrics.precision.append(precision)
-
-    avg_metrics = edict(
-        ndcg=[],
-        hr=[],
-        precision=[],
-        recall=[],
-    )
-    print("Average test set size: ", np.array(rel_size).mean())
-    for metric, values in metrics.items():
-        avg_metrics[metric] = np.mean(values)
-        avg_metric_value = np.mean(values) * 100 if metric == "ndcg_other" else np.mean(values)
-        n_users = len(values)
-        print("Overall for noOfUser={}, {}={:.4f}".format(n_users, metric,
-                                                          avg_metric_value))
-        print("\n")
-    makedirs(dataset_name)
-    with open(RECOM_METRICS_FILE_PATH[dataset_name], 'w') as f:
-        json.dump(metrics,f)
-
-def dcg_at_k(r, k, method=1):
-    r = np.asfarray(r)[:k]
-    if r.size:
-        if method == 0:
-            return r[0] + np.sum(r[1:] / np.log2(np.arange(2, r.size + 1)))
-        elif method == 1:
-            return np.sum(r / np.log2(np.arange(2, r.size + 2)))
-        else:
-            raise ValueError('method must be 0 or 1.')
-    return 0.
-
-
-def ndcg_at_k(r, k, method=1):
-    dcg_max = dcg_at_k(sorted(r, reverse=True), k, method)
-    if not dcg_max:
-        return 0.
-    return dcg_at_k(r, k, method) / dcg_max
 
 
 def batch_beam_search(env, model, uids, device, intrain=None, topk=[25, 5, 1]):
@@ -216,7 +130,7 @@ def save_output(dataset_name, pred_paths):
     pred_paths_file.close()
 
 def extract_paths(dataset_name, save_paths, path_file, train_labels, valid_labels, test_labels):
-    embeds = load_embed(args.dataset)
+    embeds = load_embed(args.dataset, TRANSE)
     user_embeds = embeds[USER]
     main_entity, main_relation = MAIN_PRODUCT_INTERACTION[dataset_name]
     product = main_entity
@@ -250,20 +164,22 @@ def extract_paths(dataset_name, save_paths, path_file, train_labels, valid_label
         save_output(dataset_name, pred_paths)
     return pred_paths, scores
 
-def evaluate_paths(dataset_name, pred_paths, emb_scores, train_labels, test_labels):
+def evaluate_paths(dataset_name, pred_paths, emb_scores, train_labels, valid_labels, test_labels):
     # 2) Pick best path for each user-product pair, also remove pid if it is in train set.
+    k = 10
     best_pred_paths = {}
     for uid in pred_paths:
         if uid in train_labels:
             train_pids = set(train_labels[uid])
-        else:
-            print("Invalid train_pids")
+        if uid in valid_labels:
+            valid_pids = set(valid_labels[uid])
+
         best_pred_paths[uid] = []
         for pid in pred_paths[uid]:
             if pid in train_pids:
                 continue
-            # if pid in validation_pids[uid]:
-            #    continue
+            if pid in valid_pids:
+                continue
             # Get the path with highest probability
             sorted_path = sorted(pred_paths[uid][pid], key=lambda x: x[1], reverse=True)
             best_pred_paths[uid].append(sorted_path[0])
@@ -280,24 +196,27 @@ def evaluate_paths(dataset_name, pred_paths, emb_scores, train_labels, test_labe
             sorted_path = sorted(best_pred_paths[uid], key=lambda x: (x[0], x[1]), reverse=True)
         elif sort_by == 'prob':
             sorted_path = sorted(best_pred_paths[uid], key=lambda x: (x[1], x[0]), reverse=True)
-        top10_pids = [p[-1][2] for _, _, p in sorted_path[:10]]  # from largest to smallest
-        top10_paths = [p for _, _, p in sorted_path[:10]]  # paths for the top10
+        top10_pids = [p[-1][2] for _, _, p in sorted_path[:k]]  # from largest to smallest
+        top10_paths = [p for _, _, p in sorted_path[:k]]  # paths for the top10
 
         # add up to 10 pids if not enough
-        if args.add_products and len(top10_pids) < 10:
+        if args.add_products and len(top10_pids) < k:
             train_pids = set(train_labels[uid])
+            valid_pids = set(valid_labels[uid])
             cand_pids = np.argsort(emb_scores[uid])
             for cand_pid in cand_pids[::-1]:
-                if cand_pid in train_pids or cand_pid in top10_pids:
+                if cand_pid in train_pids or cand_pid in valid_pids or cand_pid in top10_pids:
                     continue
                 top10_pids.append(cand_pid)
-                if len(top10_pids) >= 10:
+                if len(top10_pids) >= k:
                     break
         # end of add
         pred_labels[uid] = top10_pids[::-1]  # change order to from smallest to largest!
         pred_paths_top10[uid] = top10_paths[::-1]
 
-    evaluate(dataset_name, pred_labels, test_labels)
+    save_topks_items_results(dataset_name, MODEL, pred_labels, k)
+    save_topks_paths_results(dataset_name, MODEL, pred_paths_top10, k)
+    evaluate_rec_quality(dataset_name, pred_labels, test_labels)
 
 
 # In formula w of pi log(2 + (number of patterns of same pattern type among uv paths / total number of paths among uv paths))
@@ -324,7 +243,7 @@ def test(args):
     if args.save_paths or args.run_eval:
         pred_paths, scores = extract_paths(args.dataset, args.save_paths, path_file, train_labels, valid_labels, test_labels)
     if args.run_eval:
-        evaluate_paths(args.dataset, pred_paths, scores, train_labels, test_labels)
+        evaluate_paths(args.dataset, pred_paths, scores, train_labels, valid_labels, test_labels)
 
 
 if __name__ == '__main__':
@@ -342,9 +261,9 @@ if __name__ == '__main__':
     parser.add_argument('--hidden', type=int, nargs='*', default=[512, 256], help='number of samples')
     parser.add_argument('--add_products', type=boolean, default=True, help='Add predicted products up to 10')
     parser.add_argument('--topk', type=list, nargs='*', default=[25, 5, 1], help='number of samples')
-    parser.add_argument('--run_path', type=boolean, default=True, help='Generate predicted path? (takes long time)')
+    parser.add_argument('--run_path', type=boolean, default=False, help='Generate predicted path? (takes long time)')
     parser.add_argument('--run_eval', type=boolean, default=True, help='Run evaluation?')
-    parser.add_argument('--save_paths', type=boolean, default=True, help='Save paths')
+    parser.add_argument('--save_paths', type=boolean, default=False, help='Save paths')
     args = parser.parse_args()
 
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu

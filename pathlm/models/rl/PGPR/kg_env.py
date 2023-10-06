@@ -3,8 +3,10 @@ from __future__ import absolute_import, division, print_function
 import numpy as np
 import random
 
-from pathlm.models.rl.PGPR.pgpr_utils import load_kg, load_embed, USER, SELF_LOOP, load_labels, MAIN_PRODUCT_INTERACTION, PATH_PATTERN, \
-    KG_RELATION
+from pathlm.knowledge_graphs.kg_utils import PATH_PATTERN, MAIN_PRODUCT_INTERACTION, KG_RELATION
+from pathlm.models.embeddings.kge_utils import load_embed
+from pathlm.models.rl.PGPR.pgpr_utils import load_kg, load_labels
+from pathlm.knowledge_graphs.kg_macros import USER, SELF_LOOP
 
 
 class KGState(object):
@@ -34,12 +36,12 @@ class KGState(object):
 
 
 class BatchKGEnvironment(object):
-    def __init__(self, dataset_str, max_acts, max_path_len=3, state_history=1, optimize_for=None, alpha=None):
+    def __init__(self, dataset_str, max_acts, max_path_len=3, state_history=1, optimize_for=None, alpha=None, embed_name='transe'):
         self.max_acts = max_acts
         self.act_dim = max_acts + 1  # Add self-loop action, whose act_idx is always 0.
         self.max_num_nodes = max_path_len + 1  # max number of hops (= #nodes - 1)
         self.kg = load_kg(dataset_str)
-        self.embeds = load_embed(dataset_str)
+        self.embeds = load_embed(dataset_str, embed_name)
         self.embed_size = self.embeds[USER].shape[1]
         self.embeds[SELF_LOOP] = (np.zeros(self.embed_size), 0.0)
         self.state_gen = KGState(self.embed_size, history_len=state_history)
@@ -149,7 +151,7 @@ class BatchKGEnvironment(object):
 
     def _get_state(self, path):
         """Return state of numpy vector: [user_embed, curr_node_embed, last_node_embed, last_relation]."""
-        user_embed = self.embeds[USER][path[0][-1]]
+        user_embed = self.embeds[USER][int(path[0][-1])]
         zero_embed = np.zeros(self.embed_size)
         if len(path) == 1:  # initial state
             state = self.state_gen(user_embed, user_embed, zero_embed, zero_embed, zero_embed, zero_embed)

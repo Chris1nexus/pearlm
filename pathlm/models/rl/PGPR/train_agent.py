@@ -1,27 +1,18 @@
-from __future__ import absolute_import, division, print_function
 import warnings
-
-import numpy as np
-import torch
+from pathlm.knowledge_graphs.kg_utils import USER
+from pathlm.models.wadb_utils import MetricsLogger
 
 with warnings.catch_warnings():
     warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)       
-import os
 import argparse
 from collections import namedtuple
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-from easydict import EasyDict as edict
-from collections import defaultdict
-import wandb
-import sys
-#from models.PGPR.pgpr_utils import ML1M, TMP_DIR, get_logger, set_random_seed, USER, LOG_DIR, HPARAMS_FILE
 from pathlm.models.rl.PGPR.pgpr_utils import *
 from pathlm.models.rl.PGPR.kg_env import BatchKGEnvironment
-from pathlm.models.utils import MetricsLogger
 logger = None
 
 SavedAction = namedtuple('SavedAction', ['log_prob', 'value'])
@@ -52,8 +43,7 @@ class ActorCritic(nn.Module):
         x = F.dropout(F.elu(out), p=0.5)
 
         actor_logits = self.actor(x)
-        #actor_logits[1 - act_mask] = -999999.0
-        actor_logits[1-act_mask] = -999999.0
+        actor_logits[1-act_mask] = float('-inf')
         act_probs = F.softmax(actor_logits, dim=-1)  # Tensor of [bs, act_dim]
 
         state_values = self.critic(x)  # Tensor of [bs, 1]
@@ -155,7 +145,7 @@ def train(args):
     logger.info('Parameters:' + str([i[0] for i in model.named_parameters()]))
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    metrics = MetricsLogger(args.wandb_entity, 
+    metrics = MetricsLogger(args.wandb_entity,
                             f'pgpr_{args.dataset}',
                             config=args)
     metrics.register('train_loss')
@@ -173,13 +163,13 @@ def train(args):
 
     metrics.register('valid_loss')
     metrics.register('valid_ploss')
-    metrics.register('valid_vloss')     
+    metrics.register('valid_vloss')
     metrics.register('valid_entropy')
     metrics.register('valid_reward')
 
     metrics.register('avg_valid_loss')
     metrics.register('avg_valid_ploss')
-    metrics.register('avg_valid_vloss')     
+    metrics.register('avg_valid_vloss')
     metrics.register('avg_valid_entropy')
     metrics.register('avg_valid_reward')
     metrics.register('std_valid_reward')
@@ -245,7 +235,7 @@ def train(args):
 
                 for k,v in cur_metrics.items():
                     metrics.log(k, v)
-                #metrics.push(cur_metrics.keys())
+                #evaluation.push(cur_metrics.keys())
                 
                 step_counter[split_name] += 1
                 iter_counter += 1
