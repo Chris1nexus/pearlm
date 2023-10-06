@@ -1,7 +1,7 @@
 import os
 import pickle
 from collections import defaultdict, Counter
-from random import random
+import random
 from typing import Dict, List
 from pathlm.datasets.data_utils import get_set, get_user_negatives, get_user_positives
 from tqdm import tqdm
