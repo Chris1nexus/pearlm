@@ -1,17 +1,23 @@
+import csv
 import gzip
 import os
+import pickle
 from collections import defaultdict
+from typing import Set
 
 import numpy as np
-
-from pathlm.models.embeddings.kge_utils import get_dataset_info_dir, PRODUCT, USER, ENTITY
+import pandas as pd
+from pathlm.models.embeddings.kge_utils import get_dataset_info_dir
+from pathlm.knowledge_graphs.kg_macros import ENTITY, PRODUCT, USER
 from easydict import EasyDict as edict
 
 
 class KARSDataset(object):
-    """This class is used to load data files and save in the instance."""
+    """This class is used to load data files and save in the instance.
+    This dataset is used for the following models: {PGPR, UCPR}
+    """
 
-    def __init__(self, args, set_name='train', word_sampling_rate=1e-4, data_dir=None):
+    def __init__(self, args, set_name='train', data_dir=None):
         self.dataset_name = args.dataset
         if data_dir is None:
             self.data_dir = get_dataset_info_dir(self.dataset_name)
@@ -225,8 +231,9 @@ class KARSDataset(object):
         kg_entities_to_pid_negative_samples = dict()
         #kg_entities_to_ent_negative_samples = defaultdict(set)
 
-
+        self.unique_relations = set()
         for rel_name in product_relations:
+            self.unique_relations.add(rel_name)
             relation_edict = getattr(self, rel_name)
             for pid, kg_entities in enumerate(relation_edict.data):
                 pid_to_kg_entities[(pid, rel_name)] = set(kg_entities)
@@ -247,3 +254,110 @@ class KARSDataset(object):
         self.all_kg_entities = all_kg_entities
         self.kg_entities_to_pid = kg_entities_to_pid
         self.kg_entities_to_pid_negative_samples = kg_entities_to_pid_negative_samples
+
+    def get_path_types_in_kg(self) -> Set[str]:
+        return self.unique_relations
+
+    def get_no_path_types_in_kg(self) -> int:
+        return len(self.unique_relations)
+
+    def create_or_load_linking_interaction_recency_matrix(self):
+        lir_matrix_filepath = os.path.join(self.data_dir, "LIR_matrix.pkl")
+
+        if os.path.isfile(lir_matrix_filepath):
+            print("Loading pre-computed LIR-matrix")
+            with open(lir_matrix_filepath, 'rb') as f:
+                self.LIR_matrix = pickle.load(f)
+            f.close()
+        else:
+            print("Generating LIR-matrix")
+            self.create_linking_interaction_recency_matrix()
+            with open(lir_matrix_filepath, 'wb') as f:
+                pickle.dump(self.LIR_matrix, f)
+            f.close()
+
+    def create_linking_interaction_recency_matrix(self):
+        self.get_interaction2timestamp_map()
+        self.LIR_matrix = {uid: {} for uid in self.uid_timestamp.keys()}
+        for uid in self.uid_timestamp.keys():
+            linked_interaction_types = [PRODUCT]
+            for linked_entity_type in linked_interaction_types:
+                interactions = [type_id_time for type_id_time in self.uid_timestamp[uid] if
+                                type_id_time[0] == linked_entity_type]
+                interactions.sort(key=lambda x: x[2])
+                if len(self.uid_timestamp[uid]) <= 1:  # Skips users with only one review in train (can happen with lastfm)
+                    continue
+                ema_timestamps = normalized_ema([x[2] for x in interactions])
+                pid_lir = {}
+                for i in range(len(interactions)):
+                    pid = interactions[i][1]
+                    lir = ema_timestamps[i]
+                    pid_lir[pid] = lir
+                self.LIR_matrix[uid][linked_entity_type] = pid_lir
+
+    def get_interaction2timestamp_map(self):
+        # Load if already computated
+        metadata_filepath = os.path.join(self.data_dir, "time_metadata.pkl")
+        if os.path.isfile(metadata_filepath):
+            with open(metadata_filepath, 'rb') as f:
+                user2pid_time_tuple = pickle.load(f)
+            f.close()
+            return user2pid_time_tuple
+        # Compute and save if not yet
+        user2pid_time_tuple = defaultdict(list)
+        file = open(os.path.join(self.data_dir, "train.txt"), 'r')
+        csv_reader = csv.reader(file, delimiter='\t')
+        #uid_mapping = get_dataset_id2model_kg_id(dataset_name, model_name, "user")
+        for row in csv_reader:
+            uid = row[0] #TODO: Check if removal of uid_mapping give problems
+            pid = row[1]
+            pid_model_kg = self.pid_to_kg_entities[pid]
+            timestamp = int(row[3])
+            user2pid_time_tuple[uid].append((PRODUCT, pid_model_kg, timestamp))
+        with open(os.path.join(metadata_filepath), 'wb') as f:
+            pickle.dump((user2pid_time_tuple), f)
+        f.close()
+        return user2pid_time_tuple
+
+
+    def create_or_load_shared_entity_popularity_matrix(self):
+        sep_matrix_filepath = os.path.join(self.data_dir, "SEP_matrix.pkl")
+        if os.path.isfile(sep_matrix_filepath):
+            print("Loading pre-computed SEP-matrix")
+            with open(sep_matrix_filepath, 'rb') as f:
+                self.SEP_matrix = pickle.load(f)
+            f.close()
+        else:
+            print("Generating SEP-matrix")
+            self.SEP_matrix = self.create_shared_entity_popularity_matrix()
+            with open(sep_matrix_filepath, 'wb') as f:
+                pickle.dump(self.SEP_matrix, f)
+            f.close()
+
+    def create_shared_entity_popularity_matrix(self):
+        # Precompute entity distribution
+        SEP_matrix = {}
+        degrees = load_kg(dataset_name, model_name).degrees
+        for type, eid_degree in degrees.items():
+            eid_degree_tuples = list(zip(eid_degree.keys(), eid_degree.values()))
+            eid_degree_tuples.sort(key=lambda x: x[1])
+            ema_es = normalized_ema([x[1] for x in eid_degree_tuples])
+            pid_weigth = {}
+            for idx in range(len(ema_es)):
+                pid = eid_degree_tuples[idx][0]
+                pid_weigth[pid] = ema_es[idx]
+
+            SEP_matrix[type] = pid_weigth
+
+        return SEP_matrix
+
+def normalized_ema(values):
+    if max(values) == min(values):
+        values = np.array([i for i in range(len(values))])
+    else:
+        values = np.array([i for i in values])
+    values = pd.Series(values)
+    ema_vals = values.ewm(span=len(values)).mean().tolist()
+    min_res = min(ema_vals)
+    max_res = max(ema_vals)
+    return [(x - min_res) / (max_res - min_res) for x in ema_vals]
