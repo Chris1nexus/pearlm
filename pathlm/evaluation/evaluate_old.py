@@ -8,7 +8,7 @@ from reasoning_path_utils import *
 from utils import *
 import pickle
 import os
-from rec_quality_metrics import *
+from rec_quality_metrics_old import *
 from reasoning_path import *
 
 def generate_latex_row(model_name, avg_metrics, what="rec"):
@@ -217,7 +217,7 @@ def evaluate_rec_quality(args, topk_items, test_labels):
 
 
 
-    # Compute average values for metrics
+    # Compute average values for evaluation
     for metric, group_values in rec_quality_metrics.items():
         for group, values in group_values.items():
             avg_value = np.mean(values)
@@ -225,7 +225,7 @@ def evaluate_rec_quality(args, topk_items, test_labels):
             if args.save_avg:
                 avgs_rows.append([dataset_name, args.model, group, metric, avg_value])
 
-    # Compute global metrics
+    # Compute global evaluation
     avg_rec_quality_metrics[COVERAGE] = coverage(recommended_items_by_group, n_items_in_catalog)
     if args.save_avg:
         for group, avg_value in avg_rec_quality_metrics[COVERAGE].items():
@@ -289,7 +289,7 @@ def evaluate_fidelity(args, cutoff_topk_paths):
 
             pbar.update(1)
 
-    # Compute average values for metrics
+    # Compute average values for evaluation
     for cutoff, group_values in path_quality_metrics.items():
          for group, values in group_values.items():
             avg_value = np.mean(values)
@@ -356,7 +356,7 @@ def evaluate_path_quality(args, topk_paths):
                                         columns=["dataset", "model", "gender", "age", "metric", "value"])
         distributions_df.to_csv(results_dir + "path_quality_group_distrib.csv", sep="\t", index=False)
 
-    # Compute average values for metrics
+    # Compute average values for evaluation
     for metric, group_values in path_quality_metrics.items():
          for group, values in group_values.items():
             avg_value = np.mean(values)

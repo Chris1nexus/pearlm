@@ -1,43 +1,36 @@
 import argparse
 import os
 import pickle
-import random
-from collections import defaultdict
-from typing import List, Dict
-
-import numpy as np
-import torch
 from datasets import Dataset
 from tqdm import tqdm
 from transformers import LogitsProcessorList
 from transformers import set_seed, PreTrainedTokenizerFast
 import wandb
 
-
+from pathlm.evaluation.eval_metrics import evaluate_rec_quality
+from pathlm.evaluation.eval_utils import get_user_negatives, get_set
 from pathlm.models.lm.from_scratch_main import PERLM, PLMRec, _initialise_type_masks
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
-from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, tokenize_augmented_kg, get_user_negatives
-from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k, precision_at_k, recall_at_k
+from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, tokenize_augmented_kg
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
-from pathlm.models.rl.PGPR.pgpr_utils import RELATION
-from pathlm.sampling.container.constants import TypeMapper, LiteralPath
 from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.utils import get_pid_to_eid, get_set, check_dir, SEED
+from pathlm.utils import get_pid_to_eid, check_dir, SEED
 
 
 class Evaluator:
     def __init__(
             self,
-            dataset_name=None,
-            n_hop=3,
-            infer_batch_size=1,
-            n_sequences_per_user=10,
+            dataset_name: str=None,
+            n_hop: int=3,
+            k: int=10,
+            infer_batch_size: int=1,
+            n_sequences_per_user: int=10,
             tokenizer=None,
-            eval_device='cpu',
+            eval_device: str='cpu',
             tokenized_kg=None,
             custom_model_name=None,
-            logit_processor_type='gcd',
+            logit_processor_type: str='gcd',
                 **kwargs
     ):
         super().__init__(**kwargs)
@@ -49,6 +42,7 @@ class Evaluator:
         self.test_set = get_set(dataset_name, set_str='test')
         uids = list(self.test_set.keys())
         self.n_hop = n_hop
+        self.k = k
         self.eval_device = eval_device
 
         self.SEQUENCE_LEN = 2 * int(n_hop) + 2  # Special tokens [BOS] included
@@ -67,7 +61,7 @@ class Evaluator:
         self.test_dataset = Dataset.from_dict(self.inference_paths)
 
         logit_processor = None
-        logit_proc_kwargs ={}
+        logit_proc_kwargs = {}
         if logit_processor_type == 'gcd':
             logit_processor_cls = ConstrainedLogitsProcessorWordLevel 
         elif logit_processor_type == 'pgcd':
@@ -94,7 +88,7 @@ class Evaluator:
                             )
         ])
 
-        self.ranker = CumulativeSequenceScoreRanker(tokenizer, user_negatives=self.user_negatives, K=10,
+        self.ranker = CumulativeSequenceScoreRanker(tokenizer, user_negatives=self.user_negatives, K=self.k,
                                                     max_new_tokens=self.SEQUENCE_LEN-len(init_condition_fn(0).split()))
         print('Using: ', self.ranker)
 
@@ -142,6 +136,9 @@ class Evaluator:
         check_dir(self.result_folder)
         pickle.dump(topks, open(f"{self.result_folder}/topk_items.pkl", "wb"))
         pickle.dump(topk_sequences, open(f"{self.result_folder}/pred_paths.pkl", "wb"))
+        rec_quality_metrics, avg_rec_quality_metrics = evaluate_rec_quality(topks, self.test_set, self.k)
+        return avg_rec_quality_metrics
+        '''
         metrics = {"ndcg": [], "mmr": [], "precision": [], "recall": []}
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
@@ -165,38 +162,7 @@ class Evaluator:
         for k in metrics:
             print(f"{k}: {np.mean(metrics[k])}", end=", ")
         return metrics
-
-
-def random_baseline(args: argparse.Namespace):
-    """
-    Recommendation evaluation
-    """
-    dataset_name = args.dataset
-    test_set = get_set(dataset_name, set_str='test')
-
-    user_negatives = get_user_negatives(dataset_name)
-    topk = {}
-    metrics = {"ndcg": [], "mmr": []}
-    for uid in tqdm(list(test_set.keys()), desc="Evaluating", colour="green"):
-        topk[uid] = random.sample(user_negatives[uid], 10)
-        hits = []
-        for recommended_item in topk[uid]:
-            if recommended_item in test_set[uid]:
-                hits.append(1)
-            else:
-                hits.append(0)
-        ndcg = ndcg_at_k(hits, len(hits))
-        precision = precision_at_k(hits, len(hits))
-        recall = recall_at_k(hits, len(test_set[uid]))
-        mmr = mmr_at_k(hits, len(hits))
-        metrics["precision"].append(precision)
-        metrics["recall"].append(recall)
-        metrics["ndcg"].append(ndcg)
-        metrics["mmr"].append(mmr)
-    print("Random baseline:")
-    print(f"no of users: {len(test_set.keys())}")
-    for k in metrics:
-        print(f"{k}: {np.mean(metrics[k])}", end=", ")
+        '''
 
 def get_best_checkpoint(model_folder):
     #get the checkpoint with the highest step number in filename
@@ -218,6 +184,8 @@ if __name__ == "__main__":
                         help="Path sequence deconding method: default to Graph Constrained Decoding")    
     parser.add_argument("--n_hop", type=str, default="3",
                         help="")
+    parser.add_argument("--k", type=int, default=10,
+                        help="Size of the top-k recommendation list")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--context_length", type=int, default=24,
                         help="Context length value when training a tokenizer from scratch")

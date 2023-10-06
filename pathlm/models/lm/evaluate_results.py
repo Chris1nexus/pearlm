@@ -75,13 +75,13 @@ def evaluate_rec_quality(dataset_name, topk_items, test_labels, k=10):
             recommended_items_all_user_set.update(set(topk))
             pbar.update(1)
     avg_rec_quality_metrics[COVERAGE] = coverage(recommended_items_all_user_set, n_items_in_catalog)
-    # Compute average values for metrics
+    # Compute average values for evaluation
     for metric, values in rec_quality_metrics.items():
         avg_value = np.mean(values)
         avg_rec_quality_metrics[metric] = avg_value
-    # Compute global metrics
+    # Compute global evaluation
     # Print results
-    #print_rec_quality_metrics(avg_rec_quality_metrics)
+    print_rec_quality_metrics(avg_rec_quality_metrics)
     #print(generate_latex_row(args.model, avg_rec_quality_metrics, "rec"))
     # Save as csv if specified
     return rec_quality_metrics, avg_rec_quality_metrics

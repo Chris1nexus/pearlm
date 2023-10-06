@@ -71,7 +71,7 @@ def evaluate(actor, model, env, tokenizer, test_set, user_negatives, topk_size=1
             pbar.update(min(BATCH_SIZE, len(user_negatives)-i ))
     #pickle.dump(topks, open(f"./results/{self.dataset_name}/{custom_model_name}/topk_items.pkl", "wb"))
     #pickle.dump(topk_sequences, open(f"./results/{self.dataset_name}/{custom_model_name}/pred_paths.pkl", "wb"))   
-    metrics = defaultdict(list)
+    evaluation = defaultdict(list)
     for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
         hits = []
         
@@ -85,14 +85,14 @@ def evaluate(actor, model, env, tokenizer, test_set, user_negatives, topk_size=1
         #print(uid, topk, hits)
         ndcg = ndcg_at_k(hits, len(hits))
         mmr = mmr_at_k(hits, len(hits))
-        metrics[f"ndcg@{topk_size}"].append(ndcg)
-        metrics[f"mmr@{topk_size}"].append(mmr)
+        evaluation[f"ndcg@{topk_size}"].append(ndcg)
+        evaluation[f"mmr@{topk_size}"].append(mmr)
 
     print(
-        f"no of users: {len(test_set.keys())}, ndcg: {np.mean(metrics[f'ndcg@{topk_size}'])}, mmr: {np.mean(metrics[f'mmr@{topk_size}'])}")
+        f"no of users: {len(test_set.keys())}, ndcg: {np.mean(evaluation[f'ndcg@{topk_size}'])}, mmr: {np.mean(evaluation[f'mmr@{topk_size}'])}")
     metrics_ = dict()
-    for k in metrics:
-        metrics_[f'eval_{k}'] = np.mean(metrics[k])
+    for k in evaluation:
+        metrics_[f'eval_{k}'] = np.mean(evaluation[k])
     return metrics_
 '''
 '''
@@ -131,7 +131,7 @@ def evaluate(model, dataset, test_set, user_negatives, topk_size=10):
             pbar.update(1)
     #pickle.dump(topks, open(f"./results/{self.dataset_name}/{custom_model_name}/topk_items.pkl", "wb"))
     #pickle.dump(topk_sequences, open(f"./results/{self.dataset_name}/{custom_model_name}/pred_paths.pkl", "wb"))   
-    metrics = defaultdict(list)
+    evaluation = defaultdict(list)
     for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
         hits = []
         
@@ -145,14 +145,14 @@ def evaluate(model, dataset, test_set, user_negatives, topk_size=10):
         #print(uid, topk, hits)
         ndcg = ndcg_at_k(hits, len(hits))
         mmr = mmr_at_k(hits, len(hits))
-        metrics[f"ndcg@{topk_size}"].append(ndcg)
-        metrics[f"mmr@{topk_size}"].append(mmr)
+        evaluation[f"ndcg@{topk_size}"].append(ndcg)
+        evaluation[f"mmr@{topk_size}"].append(mmr)
 
     print(
-        f"no of users: {len(test_set.keys())}, ndcg: {np.mean(metrics[f'ndcg@{topk_size}'])}, mmr: {np.mean(metrics[f'mmr@{topk_size}'])}")
+        f"no of users: {len(test_set.keys())}, ndcg: {np.mean(evaluation[f'ndcg@{topk_size}'])}, mmr: {np.mean(evaluation[f'mmr@{topk_size}'])}")
     metrics_ = dict()
-    for k in metrics:
-        metrics_[f'eval_{k}'] = np.mean(metrics[k])
+    for k in evaluation:
+        metrics_[f'eval_{k}'] = np.mean(evaluation[k])
     return metrics_
 '''
 
