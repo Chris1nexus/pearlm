@@ -11,7 +11,7 @@ class ReasoningPath:
         self.path_type = path_type
         self.pattern = pattern
 
-    def len(self):
+    def len(self) -> int:
         len = 0
         for s in self.path:
             if type(s) != str:
