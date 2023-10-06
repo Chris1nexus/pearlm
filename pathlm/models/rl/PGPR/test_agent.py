@@ -4,7 +4,8 @@ from tqdm import tqdm
 from functools import reduce
 import warnings
 
-from pathlm.evaluation.eval_utils import save_topks_items_results, save_topks_paths_results
+from pathlm.evaluation.eval_utils import save_topks_items_results, save_topks_paths_results, compute_mostpop_topk, \
+    compute_random_baseline
 from pathlm.knowledge_graphs.kg_macros import SELF_LOOP, USER
 from pathlm.knowledge_graphs.kg_utils import KG_RELATION, MAIN_PRODUCT_INTERACTION
 from pathlm.evaluation.eval_metrics import evaluate_rec_quality
@@ -216,7 +217,11 @@ def evaluate_paths(dataset_name, pred_paths, emb_scores, train_labels, valid_lab
 
     save_topks_items_results(dataset_name, MODEL, pred_labels, k)
     save_topks_paths_results(dataset_name, MODEL, pred_paths_top10, k)
-    evaluate_rec_quality(dataset_name, pred_labels, test_labels)
+    random_topk = compute_random_baseline(dataset_name, k)
+    evaluate_rec_quality(dataset_name, random_topk, test_labels, method_name='Random Baseline')
+    mostpop_topk = compute_mostpop_topk(dataset_name, k)
+    evaluate_rec_quality(dataset_name, mostpop_topk, test_labels, method_name='MostPop Baseline')
+    evaluate_rec_quality(dataset_name, pred_labels, test_labels, method_name=MODEL)
 
 
 # In formula w of pi log(2 + (number of patterns of same pattern type among uv paths / total number of paths among uv paths))

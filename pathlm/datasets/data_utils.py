@@ -17,7 +17,7 @@ def get_user_negatives(dataset_name: str) -> Dict[int, List[int]]:
     train_set = get_set(dataset_name, set_str='train')
     valid_set = get_set(dataset_name, set_str='valid')
     for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
-        uid_negatives[uid] = list(set(ikg_ids - set(train_set[uid]) - set(valid_set[uid])))
+        uid_negatives[uid] = [int(pid) for pid in list(set(ikg_ids - set(train_set[uid]) - set(valid_set[uid])))]
     return uid_negatives
 
 
