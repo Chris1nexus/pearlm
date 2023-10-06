@@ -34,7 +34,7 @@ from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
 from pathlm.utils import get_pid_to_eid, get_set
 
-from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
+from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, MODEL_DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
         PRODUCT, USER, ENTITY, RELATION
 
 from pathlm.models.lm_rl.env import PathRLenv
@@ -237,7 +237,7 @@ def main(args):
         if i % 50  == 0:
             
             
-            #metrics = evaluate(actor, env.inference_paths, test_set, user_negatives, topk_size=10)
+            #evaluation = evaluate(actor, env.inference_paths, test_set, user_negatives, topk_size=10)
                                 
             metrics = evaluate(actor, model, env, tokenizer, test_set, user_negatives, topk_size=10, BATCH_SIZE = 16, DEVICE='cuda')
             rl_model_path = os.path.dirname(custom_name) + f'-rl/ckpt-{i}'

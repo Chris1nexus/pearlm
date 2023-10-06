@@ -9,14 +9,15 @@ from datasets import Dataset
 from tqdm import tqdm
 from transformers import Trainer, LogitsProcessorList, PreTrainedTokenizerFast, is_torch_tpu_available
 import wandb
+
+from pathlm.evaluation.eval_utils import get_user_negatives, get_set
+from pathlm.evaluation.utility_metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
-    _initialise_type_masks, \
-    get_user_negatives, get_user_positives
-from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
+    _initialise_type_masks, get_user_positives
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
-from pathlm.utils import get_pid_to_eid, get_set, check_dir
+from pathlm.utils import get_pid_to_eid,check_dir
 
 from pathlm.models.lm.evaluate_results import evaluate_rec_quality
 
@@ -143,7 +144,7 @@ class PathCLMTrainer(Trainer):
         check_dir(results_dir)#f"./results/{self.dataset_name}/{self.experiment_name}")
         pickle.dump(topks, open(os.path.join(results_dir, 'topks.pkl'), 'wb')) #f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))
         '''
-        metrics = {"ndcg": [], "mmr": [], }
+        evaluation = {"ndcg": [], "mmr": [], }
         for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
             hits = []
             for recommended_item in topk:
@@ -155,11 +156,11 @@ class PathCLMTrainer(Trainer):
                 hits.append(0)
             ndcg = ndcg_at_k(hits, len(hits))
             mmr = mmr_at_k(hits, len(hits))
-            metrics["ndcg"].append(ndcg)
-            metrics["mmr"].append(mmr)
+            evaluation["ndcg"].append(ndcg)
+            evaluation["mmr"].append(mmr)
 
         print(
-            f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(metrics['ndcg'])}, mmr: {np.mean(metrics['mmr'])}")
+            f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(evaluation['ndcg'])}, mmr: {np.mean(evaluation['mmr'])}")
         '''
         metrics_ = dict()
         _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)        
@@ -192,7 +193,7 @@ class PathCLMTrainer(Trainer):
                 wandb.log(logs)            
             self._report_to_hp_search(trial, self.state.global_step, metrics)
 
-            # Run delayed LR scheduler now that metrics are populated
+            # Run delayed LR scheduler now that evaluation are populated
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 self.lr_scheduler.step(metrics[self.cmd_args.metric_for_best_model])
 
@@ -328,7 +329,7 @@ class PathMLMTrainer(Trainer):
             metrics = self.evaluate(model)
             self._report_to_hp_search(trial, self.state.global_step, metrics)
 
-            # Run delayed LR scheduler now that metrics are populated
+            # Run delayed LR scheduler now that evaluation are populated
             if isinstance(self.lr_scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
                 self.lr_scheduler.step(metrics[self.args.metric_for_best_model])
 

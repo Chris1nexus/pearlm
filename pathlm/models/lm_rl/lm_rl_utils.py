@@ -1,5 +1,5 @@
 
-from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
+from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, MODEL_DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
         PRODUCT, USER, ENTITY, RELATION
 
 from pathlm.sampling.container.constants import LiteralPath, TypeMapper

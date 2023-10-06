@@ -26,7 +26,7 @@ from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
     _initialise_type_masks, \
     get_user_negatives, get_user_positives
 
-from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
+from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, MODEL_DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
         PRODUCT, USER, ENTITY, RELATION
 
 from pathlm.models.lm_rl.lm_rl_utils import tokenize_augmented_kg

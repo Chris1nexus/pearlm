@@ -194,14 +194,3 @@ def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
     return tokenized_kg, kg_to_vocab_mapping
 
 
-def get_user_negatives(dataset_name: str) -> Dict[str, List[str]]:
-    NOT_IN_TOKENIZER = {'1871', '831', '1950', '478', '2285'}
-    data_dir = f"data/{dataset_name}"
-    ikg_ids = set(get_pid_to_eid(data_dir).values())
-    uid_negatives = {}
-    # Generate paths for the test set
-    train_set = get_set(dataset_name, set_str='train')
-    valid_set = get_set(dataset_name, set_str='valid')
-    for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
-        uid_negatives[uid] = list(set(ikg_ids - set(train_set[uid]) - set(valid_set[uid])) - NOT_IN_TOKENIZER)
-    return uid_negatives
