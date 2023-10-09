@@ -147,6 +147,7 @@ def train(model_name: str, tokenizer, tokenized_dataset, context_length, args: a
         metric_for_best_model='ndcg',
         greater_is_better=True,
         seed=SEED,
+        report_to='wandb' if args.wandb else 'none',
         #no_cuda=True,
     )
 
@@ -205,18 +206,18 @@ if __name__ == "__main__":
     parser.add_argument("--logit_processor_type", type=str, default="gcd",
                         help="Path sequence deconding method: default to Graph Constrained Decoding")
     # Model arguments
-    parser.add_argument("--model", type=str, default="gpt2-large",
+    parser.add_argument("--model", type=str, default="distilgpt2",
                         help="Model to use from HuggingFace pretrained models")
     parser.add_argument("--nproc", type=int, default=8, help="Number of processes for dataset mapping")
     parser.add_argument("--batch_size", type=int, default=256, help="Train batch size")
-    parser.add_argument("--test_batch_size", type=int, default=256, help="Test batch size")
+    parser.add_argument("--test_batch_size", type=int, default=64, help="Test batch size")
     parser.add_argument("--context_length", type=int, default=24,
                         help="Context length value when training a tokenizer from scratch")
     parser.add_argument("--load_data", type=bool, default=False, help="")
     parser.add_argument("--load_model", type=bool, default=False, help="")
     parser.add_argument("--eval_device", type=str, default='cuda:0', help="")
     parser.add_argument("--eval_ckpt_iter", type=int, default='1', help="")
-    parser.add_argument("--infer_batch_size", type=int, default=256, help="Inference batch size")
+    parser.add_argument("--infer_batch_size", type=int, default=64, help="Inference batch size")
     parser.add_argument("--n_seq_infer", type=int, default=30,
                         help="Number of sequences generated for each user")
     parser.add_argument("--n_beams", type=int, default=30,
@@ -228,17 +229,16 @@ if __name__ == "__main__":
     parser.add_argument("--pretrain_ckpt", type=none_or_int, default=None,
                         help="Checkpoint from which to resume training of the model (default to starting from scratch)")
     # Parameter relative to weight initialization
-    parser.add_argument("--embedding_root_dir", type=str, default="./embedding-weights",
-                        help="default: ./embedding-weights")
+    parser.add_argument("--embedding_root_dir", type=str, default="./weights/embeddings",
+                        help="default: ./weights/embeddings")
     parser.add_argument("--emb_filename", type=str, default='', help="default: 'transe_embed.pkl'")
     parser.add_argument("--emb_size", type=int, default=100,
                         help="Transformer Embedding size (must match external embedding size, if chosen)")
     parser.add_argument("--logging_interval", type=int, default=100,
                         help="Logging interval of the losses")    
-    parser.add_argument("--validation_interval", type=int, default=1000,
-                        help="Validation interval")        
-
-    parser.add_argument("--num_epochs", type=int, default=20,
+    parser.add_argument("--validation_interval", type=int, default=5000,
+                        help="Validation interval")
+    parser.add_argument("--num_epochs", type=int, default=10,
                         help="Number of epochs")     
     #parser.add_argument("--num_training_steps", type=int, default=60000,
     #                    help="Training steps")                                
@@ -249,8 +249,7 @@ if __name__ == "__main__":
 
     set_seed(SEED)
 
-
-    project_name = f'from_scratch_llm_v5@{args.dataset}'
+    project_name = f'from_scratch_llm_v7@{args.dataset}'
     run_name=f"{args.exp_name}@{args.dataset}@{args.model}@{args.n_hop}@{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     log_dir = os.path.join(project_name, run_name)
     os.makedirs(log_dir, exist_ok=True)
@@ -288,7 +287,6 @@ if __name__ == "__main__":
     TOKENIZED_DATASET_PATH = os.path.join(args.data_dir, f"{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
     TOKEN_INDEX_PATH = os.path.join(dirpath, KGstats.TOKEN_INDEX_FILE)
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
-    '''
     if args.load_data and os.path.exists(TOKENIZED_DATASET_PATH) and os.path.exists(tokenizer_file):
         task = args.task
         tokenized_dataset = load_from_disk(
@@ -298,74 +296,73 @@ if __name__ == "__main__":
                                             pad_token="[PAD]", unk_token="[UNK]",
                                             mask_token="[MASK]", use_fast=True)
     else:
-    '''
-    # Load the dataset
-    plain_text_path = True
+        # Load the dataset
+        plain_text_path = True
 
-    print("Loading and processing path sequences...")
-    dataset = PathDataset(dataset_name, dataset_dir, task=args.task, sample_size=sample_size, n_hop=dataset_hop_size,
-                            plain_text_path=plain_text_path)
+        print("Loading and processing path sequences...")
+        dataset = PathDataset(dataset_name, dataset_dir, task=args.task, sample_size=sample_size, n_hop=dataset_hop_size,
+                                plain_text_path=plain_text_path)
 
-    dataset.show_random_examples()
-    dataset = dataset.dataset
-    print(type(dataset))
-    #if not os.path.exists(tokenizer_file):
-    # Word level tokenizer
-    print("Training tokenizer...")
-    tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
-    special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
-    tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
-    trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
+        dataset.show_random_examples()
+        dataset = dataset.dataset
+        print(type(dataset))
 
-    tokens = []
-    with open(TOKEN_INDEX_PATH) as f:
-        for line in f:
-            tokens.append(line.rstrip())
-    tokenizer.train_from_iterator(tokens, #dataset["path"], 
-                                    trainer=trainer)
-    tokenizer.post_processor = processors.TemplateProcessing(
-        single="[BOS]:0 $A:0 [EOS]:0",
-        special_tokens=[("[BOS]", tokenizer.token_to_id("[BOS]")), ("[EOS]", tokenizer.token_to_id("[EOS]"))]
-    )
+        if not os.path.exists(tokenizer_file):
+            # Word level tokenizer
+            print("Training tokenizer...")
+            tokenizer = Tokenizer(models.WordLevel(unk_token="[UNK]"))
+            special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]", "[BOS]", "[EOS]"]
+            tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+            trainer = trainers.WordLevelTrainer(special_tokens=special_tokens)
 
-    tokenizer.save(tokenizer_file)
-    tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
-                                        eos_token="[EOS]", bos_token="[BOS]",
-                                        pad_token="[PAD]", unk_token="[UNK]",
-                                        mask_token="[MASK]", use_fast=True)
-    #else:
-    #    tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
-    #                                        eos_token="[EOS]", bos_token="[BOS]",
-    #                                        pad_token="[PAD]", unk_token="[UNK]",
-    #                                        mask_token="[MASK]", use_fast=True)
+            tokens = []
+            with open(TOKEN_INDEX_PATH) as f:
+                for line in f:
+                    tokens.append(line.rstrip())
+            tokenizer.train_from_iterator(tokens, #dataset["path"],
+                                            trainer=trainer)
+            tokenizer.post_processor = processors.TemplateProcessing(
+                single="[BOS]:0 $A:0 [EOS]:0",
+                special_tokens=[("[BOS]", tokenizer.token_to_id("[BOS]")), ("[EOS]", tokenizer.token_to_id("[EOS]"))]
+            )
 
-    if args.task == "pretrain":
-        # Load the specified tokenizer
-        print("Tokenizing dataset...")
+            tokenizer.save(tokenizer_file)
+            tokenizer = PreTrainedTokenizerFast(tokenizer_object=tokenizer, max_len=args.context_length,
+                                                eos_token="[EOS]", bos_token="[BOS]",
+                                                pad_token="[PAD]", unk_token="[UNK]",
+                                                mask_token="[MASK]", use_fast=True)
+        else:
+            tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file, max_len=args.context_length,
+                                                eos_token="[EOS]", bos_token="[BOS]",
+                                                pad_token="[PAD]", unk_token="[UNK]",
+                                                mask_token="[MASK]", use_fast=True)
 
-        tokenized_dataset = dataset.map(tokenize_function,
-                                        batched=True,
-                                        num_proc=args.nproc,
-                                        remove_columns=["path"]
-                                        )
-        print("Train/Validation split...")
-        tokenized_dataset = tokenized_dataset.train_test_split(test_size=0.10)
-        print(tokenized_dataset['train'][0])
-    elif args.task == "end-to-end":
-        print("Tokenizing dataset...")
-        tokenized_dataset = dataset.map(tokenize_function,
-                                        batched=True,
-                                        num_proc=args.nproc,
-                                        remove_columns=["path"]
-                                        )
-        tokenized_dataset = DatasetDict({
-            "train": tokenized_dataset,
-        })
+        if args.task == "pretrain":
+            # Load the specified tokenizer
+            print("Tokenizing dataset...")
 
-    # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
-    check_dir(TOKENIZED_DATASET_PATH)
-    tokenized_dataset.save_to_disk(
-        TOKENIZED_DATASET_PATH)
+            tokenized_dataset = dataset.map(tokenize_function,
+                                            batched=True,
+                                            num_proc=args.nproc,
+                                            remove_columns=["path"]
+                                            )
+            print("Train/Validation split...")
+            tokenized_dataset = tokenized_dataset.train_test_split(test_size=0.10)
+            print(tokenized_dataset['train'][0])
+        elif args.task == "end-to-end":
+            print("Tokenizing dataset...")
+            tokenized_dataset = dataset.map(tokenize_function,
+                                            batched=True,
+                                            num_proc=args.nproc,
+                                            remove_columns=["path"]
+                                            )
+            tokenized_dataset = DatasetDict({
+                "train": tokenized_dataset,
+            })
+        # Create a dir if does not exist for the hf dataset and save the tokenized dataset to disk
+        check_dir(TOKENIZED_DATASET_PATH)
+        tokenized_dataset.save_to_disk(
+            TOKENIZED_DATASET_PATH)
 
     # Train the model
     if args.load_model: #ENSURE IS WORKING

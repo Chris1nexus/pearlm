@@ -12,6 +12,7 @@ import pandas as pd
 from collections import deque
 import random
 
+from pathlm.datasets.data_utils import get_set
 from pathlm.knowledge_graphs.kg_macros import USER, ENTITY, PRODUCT, INTERACTION
 from pathlm.knowledge_graphs.kg_utils import MAIN_PRODUCT_INTERACTION, KG_RELATION, PATH_PATTERN
 from pathlm.models.rl.PGPR.pgpr_utils import *
@@ -825,7 +826,7 @@ def update_users(uid, user_dict, pid_to_reachable):
 
 class KGstats:
     TOKEN_INDEX_FILE = 'token_index.txt'
-    def __init__(self, args, dataset_name, path, save_dir='statistics', data_dir=None):
+    def __init__(self, args, dataset_name: str, path: str, save_dir='statistics', data_dir=None):
         
         os.makedirs(save_dir, exist_ok=True)
         self.save_dir = os.path.join(save_dir, dataset_name)
@@ -840,9 +841,6 @@ class KGstats:
         
         self.dataset_name = dataset_name
         print('Loading from ', path, ' the dataset ', dataset_name)
-        uid_inter_test = os.path.join(path,  f'test.txt')
-        uid_inter_valid = os.path.join(path,  f'valid.txt')
-        uid_inter_train = os.path.join(path,  f'train.txt')
         item_list_file = os.path.join(path, 'i2kg_map.txt')#f'item_list.txt')
         kg_filepath = os.path.join(path,  f'kg_final.txt')                                      
         pid_mapping_filepath = os.path.join(path,  f'i2kg_map.txt')
@@ -860,9 +858,9 @@ class KGstats:
         
         self.items = KGstats.load_items(item_list_file)
         
-        self.train_user_dict = self.load_user_inter(uid_inter_train)
-        self.valid_user_dict = self.load_user_inter(uid_inter_valid)
-        self.test_user_dict = self.load_user_inter(uid_inter_test)    
+        self.train_user_dict = self.load_user_inter(dataset_name, 'train')
+        self.valid_user_dict = self.load_user_inter(dataset_name, 'valid')
+        self.test_user_dict = self.load_user_inter(dataset_name, 'test')
         user_dict = defaultdict(set)
         for uid in self.train_user_dict:
             user_dict[uid].update(self.train_user_dict[uid])
@@ -882,19 +880,12 @@ class KGstats:
         self.n_entities = max(max(self.kg_np[:, 0]), max(self.kg_np[:, 2])) + 1
         self.n_triples = len(self.kg_np)        
         
-    def load_user_inter(self, filepath):
+    def load_user_inter(self, dataset_name: str, set_name: str=None):
         G = defaultdict(set)
-        with open(filepath) as f:
-            for line  in f:
-                line = line.strip()
-                data = [int(v) for v in line.split('\t')]
-                
-                #print(data)
-                uid = data[0]
-                pid = int(data[1])
-                rating = int(data[2])
-                timestamp = int(data[3])
-                G[uid].add(self.pid2eid[pid])
+        curr_set = get_set(dataset_name, set_name)
+        for uid, pids in curr_set.items():
+            for pid in pids:
+                G[uid].add(pid)
         return G        
     
     def load_items(item_file):

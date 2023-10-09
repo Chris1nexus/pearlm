@@ -53,8 +53,7 @@ class Evaluator:
 
         # Load user negatives
         self.last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
-        self.user_negatives_token_ids = get_user_negatives_tokens_ids(dataset_name, tokenizer)
-        self.user_negatives = get_user_negatives(dataset_name)
+        self.user_negatives, self.user_negatives_token_ids = get_user_negatives_tokens_ids(dataset_name, tokenizer)
         self.id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
         init_condition_fn = lambda uid: f"[BOS] U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids]}

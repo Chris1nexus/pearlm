@@ -9,9 +9,6 @@ import torch
 import random
 import numpy as np
 
-
-
-
 def check_dir(dir_path: str) -> None:
     """
     Check if directory exists and create it if not

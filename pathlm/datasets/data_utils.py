@@ -1,4 +1,5 @@
 import csv
+import os
 from collections import defaultdict
 from typing import Dict, List
 from tqdm import tqdm
@@ -11,7 +12,7 @@ def get_user_negatives(dataset_name: str) -> Dict[int, List[int]]:
     Note that the ids are the entity ids to be in the same space of the models.
     """
     pid2eid = get_dataset_id2eid(dataset_name, what='product')
-    ikg_ids = set(pid2eid.values()) # All the ids of products in the kg
+    ikg_ids = set([int(eid) for eid in set(pid2eid.values())]) # All the ids of products in the kg
     uid_negatives = {}
     # Generate paths for the test set
     train_set = get_set(dataset_name, set_str='train')

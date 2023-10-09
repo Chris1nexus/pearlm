@@ -34,7 +34,7 @@ def parse_bprmf_args():
 
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='Learning rate.')
-    parser.add_argument('--n_epoch', type=int, default=1000,
+    parser.add_argument('--n_epoch', type=int, default=300,
                         help='Number of epoch.')
     parser.add_argument('--stopping_steps', type=int, default=3,
                         help='Number of epoch for early stopping')
@@ -50,7 +50,7 @@ def parse_bprmf_args():
     args = parser.parse_args()
 
 
-    save_dir = os.path.join('weights', args.data_name, args.model_type, args.model_type + str(args.embed_dim) +
+    save_dir = os.path.join('weights', args.data_name, MODEL, MODEL + str(args.embed_dim) +
                             str(args.lr) + str(args.use_pretrain))
     args.save_dir = save_dir
 

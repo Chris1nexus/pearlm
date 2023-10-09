@@ -14,12 +14,12 @@ class PathDataset:
         self.task = task
         self.sample_size = sample_size
         self.n_hop = n_hop
-
+        self.plain_text_path = plain_text_path #Currently not used, experimental parameter
         self.read_single_csv_to_hf_dataset()
         # Get eid2name and rid2name
         self.eid2name = get_eid_to_name_map(self.dataset_name)
         self.rid2name = get_rid_to_name_map(self.dataset_name)
-        self.plain_text_path = plain_text_path
+
 
 
     # Based on the path struct, for now it is p to p
@@ -86,7 +86,7 @@ class PathDataset:
         # Convert to HuggingFace Dataset
         self.dataset = Dataset.from_pandas(combined_df)
 
-    def read_single_csv_to_hf_dataset(self):
+    def read_single_csv_to_hf_dataset(self) -> None:
         #file_list = [f for f in listdir(self.data_dir) if isfile(join(self.data_dir, f))]
         #filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
         filename = f'paths_{self.task}_{self.sample_size}_{self.n_hop}.txt'
@@ -106,5 +106,5 @@ class PathDataset:
 
 
 
-    def show_random_examples(self):
+    def show_random_examples(self) -> None:
         print(self.dataset["path"][:10])

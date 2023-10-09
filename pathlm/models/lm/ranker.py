@@ -45,13 +45,16 @@ class CumulativeSequenceScoreRanker():
         for sequence in sorted_sequences:
             sequence = self.tokenizer.decode(sequence).split(' ')
             # print(sequence)
-            uid = sequence[1][1:]
+            uid_token = sequence[1]
+            if not uid_token.startswith("U"):
+                continue
+            uid = int(sequence[1][1:])
             if len(self.topk[uid]) >= self.K:
                 continue
             recommended_token = sequence[-1]
-            recommended_item = recommended_token[1:]
             if not recommended_token.startswith("P"):
                 continue
+            recommended_item = int(recommended_token[1:])
             if recommended_item not in self.user_negatives[uid]:
                 continue
             if recommended_item in self.topk[uid]:

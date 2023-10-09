@@ -15,7 +15,7 @@ from pathlm.evaluation.eval_utils import get_user_negatives, get_set
 from pathlm.evaluation.utility_metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
-from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
+from pathlm.models.lm.lm_utils import get_user_negatives_and_tokens_ids, \
     _initialise_type_masks, get_user_positives
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
 from pathlm.utils import get_dataset_id2eid, check_dir
@@ -61,10 +61,9 @@ class PathCLMTrainer(Trainer):
         print('Sequence length: ', self.SEQUENCE_LEN)
 
         # Load user negatives
-        self.last_item_idx = max([int(id) for id in get_dataset_id2eid(data_dir).values()])
-        self.user_negatives_token_ids = get_user_negatives_tokens_ids(dataset_name, tokenizer)
-        self.user_negatives = get_user_negatives(dataset_name)
-        self.id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
+        self.last_item_idx = max([int(id) for id in get_dataset_id2eid(dataset_name, 'product').values()])
+        self.user_negatives, self.user_negatives_token_ids = get_user_negatives_and_tokens_ids(dataset_name, tokenizer)
+        self.token_id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): uid for uid in uids}
         init_condition_fn = lambda uid: f"[BOS] U{uid} R-1"
         self.inference_paths = {'uid': [init_condition_fn(uid) for uid in uids]}
 
@@ -88,7 +87,7 @@ class PathCLMTrainer(Trainer):
                                 tokenizer=tokenizer,
                                 total_length=self.SEQUENCE_LEN,
                                 num_return_sequences=self.N_SEQUENCES_PER_USER,
-                                id_to_uid_token_map=self.id_to_uid_token_map,
+                                id_to_uid_token_map=self.token_id_to_uid_token_map,
                                 eos_token_ids=[
                                     self.tokenizer.convert_tokens_to_ids(self.tokenizer.eos_token)],
                                 **logit_proc_kwargs
@@ -102,7 +101,6 @@ class PathCLMTrainer(Trainer):
         if isinstance(model, torch.nn.DataParallel):
             model = model.module
         batch_size = self.INFERENCE_BATCH_SIZE
-        topk = defaultdict(list)
         with tqdm(initial=0, desc="Generating topks", colour="green", total=len(self.user_negatives)) as pbar:
             for i in range(0, len(self.test_dataset), batch_size):
                 batch = self.test_dataset[i:i + batch_size]

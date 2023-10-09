@@ -1,11 +1,11 @@
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
-from pathlm.datasets.data_utils import get_set
+from pathlm.datasets.data_utils import get_set, get_user_negatives
 from pathlm.utils import get_eid_to_name_map, get_data_dir, get_dataset_id2eid
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
-from pathlm.knowledge_graphs.kg_macros import RELATION
+from pathlm.knowledge_graphs.kg_macros import RELATION, USER
 from pathlm.sampling.container.constants import LiteralPath, TypeMapper
 from pathlm.tools.mapper import EmbeddingMapper
 
@@ -80,14 +80,14 @@ def get_entity_vocab(dataset_name: str, model_name: str) -> List[int]:
         ans.append(tokenize_and_get_input_ids(entity))
     return [item for sublist in ans for item in sublist]
 
-def get_user_negatives_tokens_ids(dataset_name: str, tokenizer) -> Dict[str, List[str]]:
+def get_user_negatives_tokens_ids_old(dataset_name: str, tokenizer) -> Dict[str, List[str]]:
     ikg_ids = list(get_dataset_id2eid(dataset_name).values())
-    for ikg_id in ikg_ids:
-        print(tokenizer(f"P{ikg_id}").input_ids)
-        break 
-    for ikg_id in ikg_ids:
-        print(tokenizer.convert_tokens_to_ids(f"P{ikg_id}"))
-        break         
+    #for ikg_id in ikg_ids:
+    #    print(tokenizer(f"P{ikg_id}").input_ids)
+    #    break
+    #for ikg_id in ikg_ids:
+    #    print(tokenizer.convert_tokens_to_ids(f"P{ikg_id}"))
+    #    break
     #ikg_token_ids = set([tokenizer(f"P{ikg_id}").input_ids[1] for ikg_id in ikg_ids])
     ikg_token_ids = set([tokenizer.convert_tokens_to_ids(f"P{ikg_id}") for ikg_id in ikg_ids])
     uid_negatives = {}
@@ -101,6 +101,19 @@ def get_user_negatives_tokens_ids(dataset_name: str, tokenizer) -> Dict[str, Lis
         val_items = [tokenizer.convert_tokens_to_ids(f"P{item}") for item in valid_set[uid]]        
         uid_negatives[uid] = list(set(ikg_token_ids - set(train_items) - set(val_items) - set([0])))
     return uid_negatives
+
+def get_user_negatives_and_tokens_ids(dataset_name: str, tokenizer) -> Tuple[Dict[int, List[int]], Dict[int, List[int]]]:
+    """
+    Returns a dictionary with the user negatives in the dataset, this means the items not interacted in the train and valid sets.
+    Note that the ids are the entity ids to be in the same space of the models.
+    And a dictionary with the user negatives tokens ids converted
+    """
+    user_negatives_ids = get_user_negatives(dataset_name)
+    user_negatives_tokens_ids = {}
+    for uid in tqdm(user_negatives_ids.keys(), desc="Calculating user negatives tokens ids", colour="green"):
+        user_negatives_tokens_ids[uid] = [tokenizer.convert_tokens_to_ids(f"P{item}") for item in user_negatives_ids[uid]]
+    return user_negatives_ids, user_negatives_tokens_ids
+
 
 def get_user_positives(dataset_name: str) -> Dict[str, List[str]]:
     uid_positives = {}
@@ -163,7 +176,10 @@ def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
         cur_id = int(token[1:])
 
         type = TypeMapper.mapping[cur_type]
-        subtype = type_id_to_subtype_mapping[type][cur_id]
+        if type == USER: #Special case since entity ids for user are in a different space compared to the other entities
+            subtype = USER
+        else:
+            subtype = type_id_to_subtype_mapping[type][cur_id]
         if cur_type == LiteralPath.rel_type:
             cur_id = None
         value = token

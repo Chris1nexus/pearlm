@@ -98,8 +98,7 @@ def train(args):
 
     # initialize metrics
     best_epoch = -1
-    best_recall = 0
-
+    EARLY_STOP_METRIC = NDCG
     Ks = eval(args.Ks)
     k_min = min(Ks)
     k_max = max(Ks)
@@ -158,12 +157,12 @@ def train(args):
             for k in Ks:
                 for m in [PRECISION, RECALL, NDCG]:
                     metrics_list[k][m].append(metrics_dict[k][m])
-            best_recall, should_stop = early_stopping(metrics_list[k_min][RECALL], args.stopping_steps)
+            best_metric, should_stop = early_stopping(metrics_list[k_min][EARLY_STOP_METRIC], args.stopping_steps)
 
             if should_stop:
                 break
 
-            if metrics_list[k_min][RECALL].index(best_recall) == len(epoch_list) - 1:
+            if metrics_list[k_min][RECALL].index(best_metric) == len(epoch_list) - 1:
                 save_model(model, args.save_dir, epoch, best_epoch)
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch

@@ -1,9 +1,21 @@
 import argparse
-from utils import *
-from mappers.mapper_pgpr import MapperPGPR
-from mappers.mapper_cafe import MapperCAFE
-from mappers.mapper_ucpr import MapperUCPR
-from mappers.mapper_kgat import MapperKGAT
+
+from pathlm.data_mappers.mapper_cafe import MapperCAFE
+from pathlm.data_mappers.mapper_kgat import MapperKGAT
+from pathlm.data_mappers.mapper_pgpr import MapperPGPR
+
+PGPR = 'pgpr'
+CAFE = 'cafe'
+UCPR = 'ucpr'
+KGAT = 'kgat'
+CKE = 'cke'
+CFKG = 'cfkg'
+BPRMF = 'bprmf'
+NFM = 'nfm'
+FM = 'fm'
+TRANSE = 'transe'
+
+SUPPORTED_MODELS = [PGPR, CAFE, UCPR, KGAT, CKE, CFKG, BPRMF, NFM, FM, TRANSE]
 
 
 def main():
@@ -19,7 +31,8 @@ def main():
     elif args.model == CAFE:
         MapperCAFE(args)
     elif args.model == UCPR:
-        MapperUCPR(args)
+        #MapperUCPR(args)
+        pass
     elif args.model == KGAT:
         MapperKGAT(args)
     elif args.model == CKE:
@@ -38,9 +51,7 @@ def main():
         # Kgat mapper holds correct also for fm
         MapperKGAT(args)  
     elif args.model == TRANSE:
-        MapperUCPR(args)          
-
-    elif args.model == MLR:
+        #MapperUCPR(args)
         pass
 
 

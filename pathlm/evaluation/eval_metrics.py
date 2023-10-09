@@ -48,6 +48,8 @@ def evaluate_rec_quality(dataset_name: str, topk_items: Dict[int, List[int]], te
     pid2popularity = get_item_pop(dataset_name)  # Needed for novelty
     pid2genre = get_item_genre(dataset_name)  # Needed for diversity
     mostpop_topk = compute_mostpop_topk(dataset_name, k)  # Needed for serendipity
+
+    topk_sizes = []
     # Evaluate recommendation quality for users' topk
     with tqdm(desc=f"Evaluating rec quality for {method_name}", total=len(topk_items.keys())) as pbar:
         for uid, topk in topk_items.items():
@@ -83,6 +85,7 @@ def evaluate_rec_quality(dataset_name: str, topk_items: Dict[int, List[int]], te
 
             # For coverage
             recommended_items_all_user_set.update(set(topk))
+            topk_sizes.append(len(topk))
             pbar.update(1)
 
     # Compute average values for evaluation
@@ -90,6 +93,7 @@ def evaluate_rec_quality(dataset_name: str, topk_items: Dict[int, List[int]], te
     avg_rec_quality_metrics[COVERAGE] = coverage(recommended_items_all_user_set, n_items_in_catalog)
 
     # Print results
+    print(f'Number of users: {len(test_labels.keys())}, average topk size: {np.array(topk_sizes).mean():.2f}')
     print_rec_quality_metrics(avg_rec_quality_metrics)
     # print(generate_latex_row(args.model, avg_rec_quality_metrics, "rec"))
     # Save as csv if specified
