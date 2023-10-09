@@ -55,3 +55,12 @@ def get_user_positives(dataset_name: str) -> Dict[int, List[int]]:
     for uid in tqdm(train_set.keys(), desc="Calculating user negatives", colour="green"):
         uid_positives[uid] = list(set(train_set[uid]).union(set(valid_set[uid])))
     return uid_positives
+
+def get_eid_to_name(dataset_name: str) -> Dict[str, str]:
+    eid2name = dict()
+    with open(os.path.join(f'data/{dataset_name}/preprocessed/e_map.txt')) as f:
+        reader = csv.reader(f, delimiter='\t')
+        for row in reader:
+            eid, name = row[:2]
+            eid2name[eid] = ' '.join(name.split('_'))
+    return eid2name

@@ -11,7 +11,7 @@ from transformers import PreTrainedTokenizerFast, set_seed,AutoConfig,AutoModelF
 import numpy as np
 from datasets import load_from_disk
 
-from pathlm.utils import SEED, get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
+from pathlm.utils import *
 from pathlm.models.rl.PGPR.pgpr_utils import *
 from pathlm.sampling.container.kg_analyzer import KGstats
 

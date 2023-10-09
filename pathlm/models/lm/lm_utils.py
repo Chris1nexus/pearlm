@@ -1,11 +1,12 @@
 from typing import List, Dict
+
+from pathlm.datasets.data_utils import get_set
+from pathlm.utils import get_eid_to_name_map, get_data_dir, get_dataset_id2eid
 from tqdm import tqdm
 from transformers import AutoTokenizer
-from pathlm.utils import get_eid_to_name_map, get_data_dir, get_pid_to_eid, get_set
-from pathlm.sampling.container.constants import LiteralPath
-from pathlm.models.rl.PGPR.pgpr_utils import RELATION
+
+from pathlm.knowledge_graphs.kg_macros import RELATION
 from pathlm.sampling.container.constants import LiteralPath, TypeMapper
-from pathlm.sampling.container.kg_analyzer import KGstats
 from pathlm.tools.mapper import EmbeddingMapper
 
 
@@ -80,8 +81,7 @@ def get_entity_vocab(dataset_name: str, model_name: str) -> List[int]:
     return [item for sublist in ans for item in sublist]
 
 def get_user_negatives_tokens_ids(dataset_name: str, tokenizer) -> Dict[str, List[str]]:
-    data_dir = f"data/{dataset_name}"
-    ikg_ids = list(get_pid_to_eid(data_dir).values())
+    ikg_ids = list(get_dataset_id2eid(dataset_name).values())
     for ikg_id in ikg_ids:
         print(tokenizer(f"P{ikg_id}").input_ids)
         break 

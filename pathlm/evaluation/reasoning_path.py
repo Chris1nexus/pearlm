@@ -1,3 +1,5 @@
+from pathlm.metrics.reasoning_path_utils import get_no_path_types_in_kg
+
 from reasoning_path_utils import *
 
 

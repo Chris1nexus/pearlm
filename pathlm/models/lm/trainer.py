@@ -2,7 +2,7 @@ import os
 import pickle
 from collections import defaultdict
 from typing import Dict
-import time
+
 import numpy as np
 import torch
 from datasets import Dataset
@@ -10,6 +10,7 @@ from tqdm import tqdm
 from transformers import Trainer, LogitsProcessorList, PreTrainedTokenizerFast, is_torch_tpu_available
 import wandb
 
+from pathlm.evaluation.eval_metrics import evaluate_rec_quality
 from pathlm.evaluation.eval_utils import get_user_negatives, get_set
 from pathlm.evaluation.utility_metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
@@ -17,10 +18,7 @@ from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWord
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
     _initialise_type_masks, get_user_positives
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
-from pathlm.utils import get_pid_to_eid,check_dir
-
-from pathlm.models.lm.evaluate_results import evaluate_rec_quality
-
+from pathlm.utils import get_dataset_id2eid, check_dir
 
 
 class PathCLMTrainer(Trainer):
@@ -63,7 +61,7 @@ class PathCLMTrainer(Trainer):
         print('Sequence length: ', self.SEQUENCE_LEN)
 
         # Load user negatives
-        self.last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
+        self.last_item_idx = max([int(id) for id in get_dataset_id2eid(data_dir).values()])
         self.user_negatives_token_ids = get_user_negatives_tokens_ids(dataset_name, tokenizer)
         self.user_negatives = get_user_negatives(dataset_name)
         self.id_to_uid_token_map = {tokenizer.convert_tokens_to_ids(f'U{uid}'): f'{uid}' for uid in uids}
@@ -163,7 +161,7 @@ class PathCLMTrainer(Trainer):
             f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(evaluation['ndcg'])}, mmr: {np.mean(evaluation['mmr'])}")
         '''
         metrics_ = dict()
-        _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)        
+        _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)
         for k in avg_rec_quality_metrics:
             metrics_[f'eval_{k}'] = np.mean(avg_rec_quality_metrics[k])
         return metrics_
@@ -227,7 +225,7 @@ class PathMLMTrainer(Trainer):
         self.eval_device = eval_device
 
         # Load user negatives
-        self.last_item_idx = max([int(id) for id in get_pid_to_eid(data_dir).values()])
+        self.last_item_idx = max([int(id) for id in get_dataset_id2eid(data_dir).values()])
         self.user_positives = get_user_positives(dataset_name)
 
         init_condition_fn = lambda uid: f"U{uid} -1 [MASK] [MASK] [MASK] [MASK]"

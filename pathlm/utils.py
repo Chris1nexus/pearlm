@@ -55,11 +55,11 @@ def get_eid2dataset_id(dataset_name: str, what: str="user") -> Dict[str, str]:
     file.close()
     return eid2dataset_id
 
-def get_rid_to_name_map(data_dir: str) -> dict:
+def get_rid_to_name_map(dataset_name: str) -> dict:
     """
     Get rid2name dictionary to allow conversion from rid to name
     """
-    r_map_path = join(data_dir, 'preprocessed', 'r_map.txt')
+    r_map_path = join(f'data/{dataset_name}', 'preprocessed/r_map.txt')
     rid2name = {}
     with open(r_map_path) as f:
         reader = csv.reader(f, delimiter='\t')
@@ -79,7 +79,7 @@ def get_model_data_dir(model_name: str, dataset_name: str) -> str:
     return join(get_data_dir(dataset_name), model_name)
 
 
-def get_eid_to_name(dataset_name):
+def get_eid_to_name_map(dataset_name: str) -> Dict[str, str]:
     eid2name = dict()
     with open(os.path.join(f'data/{dataset_name}/preprocessed/e_map.txt')) as f:
         reader = csv.reader(f, delimiter='\t')

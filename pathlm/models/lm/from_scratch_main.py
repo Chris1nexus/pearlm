@@ -16,25 +16,12 @@ from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
 
 from pathlm.models.lm.plmrec import PLMRec
 from pathlm.models.lm.perlm import PERLM 
-from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
-                    _initialise_type_masks, \
-                    _initialise_weights_from_kge, \
-                    tokenize_augmented_kg, \
-                    get_user_negatives
-from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k
+from pathlm.models.lm.lm_utils import _initialise_type_masks, tokenize_augmented_kg
 from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.sampling.container.kg_analyzer import KGstats
 from pathlm.tools.mapper import EmbeddingMapper
-from pathlm.utils import SEED, get_pid_to_eid, get_set, check_dir
+from pathlm.utils import SEED, check_dir
 
-
-from multiprocessing import Pool
-from datasets import Dataset
-from os import listdir
-from os.path import isfile, join
-import pandas as pd
-import math
-from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
 from pathlm.models.lm.trainer import PathCLMTrainer
 
 from datetime import datetime
@@ -216,9 +203,7 @@ if __name__ == "__main__":
                         help="Number of elements in a predicted sequence (considering only the ids)")
 
     parser.add_argument("--logit_processor_type", type=str, default="gcd",
-                        help="Path sequence deconding method: default to Graph Constrained Decoding")    
-
-
+                        help="Path sequence deconding method: default to Graph Constrained Decoding")
     # Model arguments
     parser.add_argument("--model", type=str, default="gpt2-large",
                         help="Model to use from HuggingFace pretrained models")
@@ -286,11 +271,6 @@ if __name__ == "__main__":
             config=vars(args)
         )
     print(args)
-    
-
-
-
-
 
     TOKENIZER_TYPE = "WordLevel"
     model_name = args.model
@@ -303,8 +283,6 @@ if __name__ == "__main__":
     dirpath = f'{args.data_dir}/{args.dataset}/preprocessed'
     data_dir_mapping = os.path.join(args.data_dir, f'{args.dataset}/preprocessed/mapping/')
     kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
-
-
     sample_size = args.sample_size
     dataset_hop_size = args.n_hop
     TOKENIZED_DATASET_PATH = os.path.join(args.data_dir, f"{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")

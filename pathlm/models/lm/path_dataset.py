@@ -3,8 +3,8 @@ from datasets import Dataset
 from os import listdir
 from os.path import isfile, join
 import pandas as pd
-
 from pathlm.utils import get_eid_to_name_map, get_rid_to_name_map
+
 
 class PathDataset:
     def __init__(self, dataset_name: str, base_data_dir: str="", task: str=None, sample_size: str=None, n_hop: str=None, plain_text_path=False):
@@ -17,8 +17,8 @@ class PathDataset:
 
         self.read_single_csv_to_hf_dataset()
         # Get eid2name and rid2name
-        self.eid2name = get_eid_to_name_map(self.base_data_dir)
-        self.rid2name = get_rid_to_name_map(self.base_data_dir)
+        self.eid2name = get_eid_to_name_map(self.dataset_name)
+        self.rid2name = get_rid_to_name_map(self.dataset_name)
         self.plain_text_path = plain_text_path
 
 
