@@ -13,6 +13,7 @@ import torch.optim as optim
 import torch.multiprocessing as mp
 
 from pathlm.evaluation.eval_metrics import evaluate_rec_quality
+from pathlm.evaluation.utility_metrics import RECALL, NDCG, PRECISION
 from pathlm.models.traditional.NFM.nfm import NFM
 from pathlm.models.traditional.NFM.dataloader_nfm import DataLoaderNFM
 from pathlm.models.traditional.NFM.parser_nfm import parse_nfm_args
@@ -85,7 +86,7 @@ def evaluate(model, dataloader, Ks, num_processes, device):
     user_ids = np.array(user_ids)
     item_ids = np.array(item_ids)
     topk_items_dict = compute_topks(cf_score_matrix, train_user_dict, valid_user_dict, test_user_dict, user_ids, item_ids, Ks)
-    avg_metrics_dict = {k: evaluate_rec_quality("ml1m", topk_items_dict, test_user_dict, k)[1] for k in Ks}
+    avg_metrics_dict = {k: evaluate_rec_quality(dataloader.dataset_name, topk_items_dict, test_user_dict, k)[1] for k in Ks}
     cf_score_matrix = cf_score_matrix.numpy()
     return cf_score_matrix, avg_metrics_dict
 
@@ -132,7 +133,7 @@ def train(args):
     k_max = max(Ks)
 
     epoch_list = []
-    metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
+    metrics_list = {k: {PRECISION: [], RECALL: [], NDCG: []} for k in Ks}
 
     num_processes = args.test_cores
     #if num_processes and num_processes > 1:
@@ -176,18 +177,18 @@ def train(args):
             time3 = time()
             _, metrics_dict = evaluate_func(model, data, Ks, num_processes, device)
             logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time3, metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
+                epoch, time() - time3, metrics_dict[k_min][PRECISION], metrics_dict[k_max][PRECISION], metrics_dict[k_min][RECALL], metrics_dict[k_max][RECALL], metrics_dict[k_min][NDCG], metrics_dict[k_max][NDCG]))
 
             epoch_list.append(epoch)
             for k in Ks:
-                for m in ['precision', 'recall', 'ndcg']:
+                for m in [PRECISION, RECALL, NDCG]:
                     metrics_list[k][m].append(metrics_dict[k][m])
-            best_metric, should_stop = early_stopping(metrics_list[k_min]['ndcg'], args.stopping_steps)
+            best_metric, should_stop = early_stopping(metrics_list[k_min][NDCG], args.stopping_steps)
 
             if should_stop:
                 break
 
-            if metrics_list[k_min]['ndcg'].index(best_metric) == len(epoch_list) - 1:
+            if metrics_list[k_min][NDCG].index(best_metric) == len(epoch_list) - 1:
                 save_model(model, args.save_dir, epoch, best_epoch)
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch
@@ -196,7 +197,7 @@ def train(args):
     metrics_df = [epoch_list]
     metrics_cols = ['epoch_idx']
     for k in Ks:
-        for m in ['precision', 'recall', 'ndcg']:
+        for m in [PRECISION, RECALL, NDCG]:
             metrics_df.append(metrics_list[k][m])
             metrics_cols.append('{}@{}'.format(m, k))
     metrics_df = pd.DataFrame(metrics_df).transpose()
@@ -235,7 +236,8 @@ def predict(args):
     cf_scores, metrics_dict = evaluate_func(model, data, Ks, num_processes, device)
     np.save(args.save_dir + 'cf_scores.npy', cf_scores)
     print('CF Evaluation: Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
+        metrics_dict[k_min][PRECISION], metrics_dict[k_max][PRECISION], metrics_dict[k_min][RECALL],
+        metrics_dict[k_max][RECALL], metrics_dict[k_min][NDCG], metrics_dict[k_max][NDCG]))
 
 
 

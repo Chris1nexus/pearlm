@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 import random
+from collections import defaultdict
 from time import time
 
 import numpy as np
@@ -11,16 +12,19 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.optim as optim
 
+from pathlm.evaluation.eval_metrics import evaluate_rec_quality
+from pathlm.evaluation.utility_metrics import PRECISION, RECALL, NDCG
 from pathlm.models.traditional.BPRMF.bprmf import BPRMF
 from pathlm.models.traditional.BPRMF.dataloader_bprmf import DataLoaderBPRMF
 from pathlm.models.traditional.BPRMF.parser_bprmf import parse_bprmf_args
-from pathlm.models.traditional.traditional_utils import early_stopping, save_model, load_model
+from pathlm.models.traditional.traditional_utils import early_stopping, save_model, load_model, compute_topks
 from pathlm.models.traditional.log_helper import logging_config, create_log_id
 
 
 def evaluate(model, dataloader, Ks, device):
     test_batch_size = dataloader.test_batch_size
     train_user_dict = dataloader.train_user_dict
+    valid_user_dict = dataloader.valid_user_dict
     test_user_dict = dataloader.test_user_dict
 
     model.eval()
@@ -33,29 +37,30 @@ def evaluate(model, dataloader, Ks, device):
     item_ids = torch.arange(n_items, dtype=torch.long).to(device)
 
     cf_scores = []
-    metric_names = ['precision', 'recall', 'ndcg']
-    metrics_dict = {k: {m: [] for m in metric_names} for k in Ks}
+    metrics_dict = {k: defaultdict(list) for k in Ks}
 
     with tqdm(total=len(user_ids_batches), desc='Evaluating Iteration') as pbar:
         for batch_user_ids in user_ids_batches:
             batch_user_ids = batch_user_ids.to(device)
 
             with torch.no_grad():
-                batch_scores = model(batch_user_ids, item_ids, is_train=False)       # (n_batch_users, n_items)
+                batch_scores = model(batch_user_ids, item_ids, is_train=False)  # (n_batch_users, n_items)
 
             batch_scores = batch_scores.cpu()
-            batch_metrics = calc_metrics_at_k(batch_scores, train_user_dict, test_user_dict, batch_user_ids.cpu().numpy(), item_ids.cpu().numpy(), Ks)
-
+            topk_items_dict = compute_topks(batch_scores, train_user_dict, valid_user_dict, test_user_dict, batch_user_ids.cpu().numpy(),
+                                          item_ids.cpu().numpy(), Ks)
+            avg_metrics_dict = {k: evaluate_rec_quality(dataloader.dataset_name, topk_items_dict, test_user_dict, k)[1] for k in Ks}
             cf_scores.append(batch_scores.numpy())
             for k in Ks:
-                for m in metric_names:
-                    metrics_dict[k][m].append(batch_metrics[k][m])
+                for m in avg_metrics_dict[k].keys():
+                    metrics_dict[k][m].append(avg_metrics_dict[k][m])
             pbar.update(1)
 
     cf_scores = np.concatenate(cf_scores, axis=0)
     for k in Ks:
-        for m in metric_names:
-            metrics_dict[k][m] = np.concatenate(metrics_dict[k][m]).mean()
+        for m in metrics_dict[k].keys():
+            metrics_dict[k][m] = np.array(metrics_dict[k][m]).mean()
+
     return cf_scores, metrics_dict
 
 
@@ -100,7 +105,7 @@ def train(args):
     k_max = max(Ks)
 
     epoch_list = []
-    metrics_list = {k: {'precision': [], 'recall': [], 'ndcg': []} for k in Ks}
+    metrics_list = {k: {PRECISION: [], RECALL: [], NDCG: []} for k in Ks}
 
     # train model
     for epoch in range(1, args.n_epoch + 1):
@@ -113,7 +118,8 @@ def train(args):
 
         for iter in range(1, n_batch + 1):
             time2 = time()
-            batch_user, batch_pos_item, batch_neg_item = data.generate_cf_batch(data.train_user_dict, data.train_batch_size)
+            batch_user, batch_pos_item, batch_neg_item = data.generate_cf_batch(data.train_user_dict,
+                                                                                data.train_batch_size)
             batch_user = batch_user.to(device)
             batch_pos_item = batch_pos_item.to(device)
             batch_neg_item = batch_neg_item.to(device)
@@ -129,26 +135,35 @@ def train(args):
             total_loss += batch_loss.item()
 
             if (iter % args.print_every) == 0:
-                logging.info('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_batch, time() - time2, batch_loss.item(), total_loss / iter))
-        logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_batch, time() - time1, total_loss / n_batch))
+                logging.info(
+                    'CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(
+                        epoch, iter, n_batch, time() - time2, batch_loss.item(), total_loss / iter))
+        logging.info(
+            'CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch,
+                                                                                                              n_batch,
+                                                                                                              time() - time1,
+                                                                                                              total_loss / n_batch))
 
         # evaluate cf
         if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
             time3 = time()
             _, metrics_dict = evaluate(model, data, Ks, device)
-            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time3, metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
+            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], '
+                         'Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
+                epoch, time() - time3, metrics_dict[k_min][PRECISION], metrics_dict[k_max][PRECISION],
+                metrics_dict[k_min][RECALL], metrics_dict[k_max][RECALL], metrics_dict[k_min][NDCG],
+                metrics_dict[k_max][NDCG]))
 
             epoch_list.append(epoch)
             for k in Ks:
-                for m in ['precision', 'recall', 'ndcg']:
+                for m in [PRECISION, RECALL, NDCG]:
                     metrics_list[k][m].append(metrics_dict[k][m])
-            best_recall, should_stop = early_stopping(metrics_list[k_min]['recall'], args.stopping_steps)
+            best_recall, should_stop = early_stopping(metrics_list[k_min][RECALL], args.stopping_steps)
 
             if should_stop:
                 break
 
-            if metrics_list[k_min]['recall'].index(best_recall) == len(epoch_list) - 1:
+            if metrics_list[k_min][RECALL].index(best_recall) == len(epoch_list) - 1:
                 save_model(model, args.save_dir, epoch, best_epoch)
                 logging.info('Save model on epoch {:04d}!'.format(epoch))
                 best_epoch = epoch
@@ -157,7 +172,7 @@ def train(args):
     metrics_df = [epoch_list]
     metrics_cols = ['epoch_idx']
     for k in Ks:
-        for m in ['precision', 'recall', 'ndcg']:
+        for m in [PRECISION, RECALL, NDCG]:
             metrics_df.append(metrics_list[k][m])
             metrics_cols.append('{}@{}'.format(m, k))
     metrics_df = pd.DataFrame(metrics_df).transpose()
@@ -166,8 +181,12 @@ def train(args):
 
     # print best metrics
     best_metrics = metrics_df.loc[metrics_df['epoch_idx'] == best_epoch].iloc[0].to_dict()
-    logging.info('Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)], best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)], best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)], best_metrics['ndcg@{}'.format(k_max)]))
+    logging.info(
+        'Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
+            int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)],
+            best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)],
+            best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)],
+            best_metrics['ndcg@{}'.format(k_max)]))
 
 
 def predict(args):
@@ -190,12 +209,11 @@ def predict(args):
     cf_scores, metrics_dict = evaluate(model, data, Ks, device)
     np.save(args.save_dir + 'cf_scores.npy', cf_scores)
     print('CF Evaluation: Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        metrics_dict[k_min]['precision'], metrics_dict[k_max]['precision'], metrics_dict[k_min]['recall'], metrics_dict[k_max]['recall'], metrics_dict[k_min]['ndcg'], metrics_dict[k_max]['ndcg']))
-
+        metrics_dict[k_min][PRECISION], metrics_dict[k_max][PRECISION], metrics_dict[k_min][RECALL],
+        metrics_dict[k_max][RECALL], metrics_dict[k_min][NDCG], metrics_dict[k_max][NDCG]))
 
 
 if __name__ == '__main__':
     args = parse_bprmf_args()
     train(args)
     # predict(args)
-

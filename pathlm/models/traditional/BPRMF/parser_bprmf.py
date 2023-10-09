@@ -1,22 +1,23 @@
 import argparse
+import os
 
 from pathlm.utils import SEED
 
+MODEL = 'bprmf'
 
 def parse_bprmf_args():
     parser = argparse.ArgumentParser(description="Run BPRMF.")
-
     parser.add_argument('--seed', type=int, default=SEED,
                         help='Random seed.')
 
     parser.add_argument('--data_name', nargs='?', default='amazon-book',
                         help='Choose a dataset from {yelp2018, last-fm, amazon-book}')
-    parser.add_argument('--data_dir', nargs='?', default='datasets/',
+    parser.add_argument('--data_dir', nargs='?', default='data/',
                         help='Input data path.')
 
-    parser.add_argument('--use_pretrain', type=int, default=1,
+    parser.add_argument('--use_pretrain', type=int, default=0,
                         help='0: No pretrain, 1: Pretrain with the learned embeddings, 2: Pretrain with stored model.')
-    parser.add_argument('--pretrain_embedding_dir', nargs='?', default='datasets/pretrain/',
+    parser.add_argument('--pretrain_embedding_dir', nargs='?', default=f'weights/ml1m/{MODEL}/',
                         help='Path of learned embeddings.')
     parser.add_argument('--pretrain_model_path', nargs='?', default='trained_model/model.pth',
                         help='Path of stored model.')
@@ -35,21 +36,22 @@ def parse_bprmf_args():
                         help='Learning rate.')
     parser.add_argument('--n_epoch', type=int, default=1000,
                         help='Number of epoch.')
-    parser.add_argument('--stopping_steps', type=int, default=10,
+    parser.add_argument('--stopping_steps', type=int, default=3,
                         help='Number of epoch for early stopping')
 
-    parser.add_argument('--print_every', type=int, default=1,
+    parser.add_argument('--print_every', type=int, default=50,
                         help='Iter interval of printing loss.')
     parser.add_argument('--evaluate_every', type=int, default=10,
                         help='Epoch interval of evaluating CF.')
 
-    parser.add_argument('--Ks', nargs='?', default='[20, 40, 60, 80, 100]',
+    parser.add_argument('--Ks', nargs='?', default='[10]',
                         help='Calculate metric@K when evaluating.')
 
     args = parser.parse_args()
 
-    save_dir = 'trained_model/BPRMF/{}/embed-dim{}_lr{}_pretrain{}/'.format(
-        args.data_name, args.embed_dim, args.lr, args.use_pretrain)
+
+    save_dir = os.path.join('weights', args.data_name, args.model_type, args.model_type + str(args.embed_dim) +
+                            str(args.lr) + str(args.use_pretrain))
     args.save_dir = save_dir
 
     return args
