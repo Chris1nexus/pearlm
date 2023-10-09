@@ -1,3 +1,5 @@
+from pathlm.knowledge_graphs.kg_macros import FEATURED_BY_ARTIST, ARTIST
+from pathlm.knowledge_graphs.kg_utils import PATH_PATTERN
 from pathlm.models.rl.PGPR.pgpr_utils import *
 
 

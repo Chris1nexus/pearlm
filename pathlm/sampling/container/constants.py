@@ -1,4 +1,4 @@
-from pathlm.models.rl.PGPR.pgpr_utils import PRODUCT, USER, ENTITY, RELATION
+from pathlm.knowledge_graphs.kg_macros import PRODUCT, USER, ENTITY, RELATION
 
 
 

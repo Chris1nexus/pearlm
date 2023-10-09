@@ -12,13 +12,12 @@ import pandas as pd
 from collections import deque
 import random
 
+from pathlm.knowledge_graphs.kg_macros import USER, ENTITY, PRODUCT, INTERACTION
+from pathlm.knowledge_graphs.kg_utils import MAIN_PRODUCT_INTERACTION, KG_RELATION, PATH_PATTERN
 from pathlm.models.rl.PGPR.pgpr_utils import *
-from pathlm.sampling.container.kg import KnowledgeGraph
 from pathlm.sampling.container.path_trie import PathTrie
-from pathlm.sampling.container.file_io import PathFileIO
 from pathlm.sampling.container.constants import LiteralPath
-from pathlm.sampling.scoring.scorer  import TransEScorer
-from pathlm.models.rl.PGPR.data_utils import Dataset
+from pathlm.datasets.kg_dataset_base import KARSDataset
 
 
 def bfs(pid, aug_kg, ptrie, n_hop, product_entity_name, user_entity_name, u2p_rel_name):
@@ -832,7 +831,7 @@ class KGstats:
         self.save_dir = os.path.join(save_dir, dataset_name)
         os.makedirs(self.save_dir, exist_ok=True)
 
-        self.dataset_info = Dataset(args, data_dir=data_dir)
+        self.dataset_info = KARSDataset(args, data_dir=data_dir)
         ptrie = PathTrie(PATH_PATTERN[dataset_name])
         self.ptrie = ptrie
 
