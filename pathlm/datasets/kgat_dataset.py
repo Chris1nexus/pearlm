@@ -201,36 +201,25 @@ class KGATStyleDataset(Dataset):
             return {'users': u, 'pos_items': pos_item, 'neg_items':neg_item}#u, pos_item, neg_item #users, pos_items, neg_items
 
 
-    def as_test_feed_dict(self, model, user_batch, item_batch):
-        feed_dict = {
-            model.users: user_batch,
-            model.pos_items: item_batch,
-            model.mess_dropout: [0.] * len(self.layer_size),
-            model.node_dropout: [0.] * len(self.layer_size)
-        }
-        return feed_dict
-
-    def as_train_feed_dict(self, model, batch_data):
+    def prepare_train_data_as_feed_dict(self, batch_data):
         # Ensure batch_data is in dictionary format
+        feed_dict = {}
         if self.batch_style_id == 0:
             users, pos_items, neg_items = batch_data
-            batch_data = {
-                'users': users,
-                'pos_items': pos_items,
-                'neg_items': neg_items
-            }
-
-        feed_dict = {
-            model.users: batch_data['users'],
-            model.pos_items: batch_data['pos_items'],
-            model.neg_items: batch_data['neg_items'],
-            model.mess_dropout: self.mess_dropout,
-            model.node_dropout: self.node_dropout
-        }
+            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = users, pos_items, neg_items
+        else:
+            return batch_data
         return feed_dict
 
-    def prepare_train_data(self, batch_data):
+    def prepare_test_data_as_feed_dict(self, batch_data):
         feed_dict = {}
+        if self.batch_style_id == 0:
+            users, pos_items, neg_items = batch_data
+            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = users, pos_items, neg_items
+        else:
+            return batch_data
+        return feed_dict
+        '''
         # Ensure batch_data is in dictionary format
         if self.batch_style_id == 0:
             users, pos_items, neg_items = batch_data
@@ -239,3 +228,15 @@ class KGATStyleDataset(Dataset):
             pos_items = batch_data['pos_items']
             neg_items = batch_data['neg_items']
         return users, pos_items, neg_items
+        '''
+
+
+    def prepare_train_data_kge_as_feed_dict(self, batch_data):
+        feed_dict = {}
+        if self.batch_style_id == 0:
+            heads, relations, pos_tails, neg_tails = batch_data
+            feed_dict['heads'], feed_dict['relations'], feed_dict['pos_tails'], feed_dict['neg_tails'] = heads, relations, pos_tails, neg_tails
+        else:
+            return batch_data
+        return feed_dict
+

@@ -4,6 +4,7 @@ Tensorflow Implementation of Knowledge Graph Attention Network (KGAT) model in:
 Wang Xiang et al. KGAT: Knowledge Graph Attention Network for Recommendation. In KDD 2019.
 @author: Xiang Wang (xiangwang@u.nus.edu)
 '''
+import os
 import random
 
 import numpy as np
@@ -175,35 +176,159 @@ class KGAT_loader(KGATStyleDataset):
         else:
             return {'heads': h, 'relations': pos_rs[0], 'pos_tails': pos_ts[0], 'neg_tails': neg_ts[0]}
 
-    def as_test_feed_dict(self, model, user_batch, item_batch):
-        return {
-            model.users: torch.tensor(user_batch),
-            model.pos_items: torch.tensor(item_batch),
-            model.mess_dropout: torch.zeros(len(eval(self.args.layer_size))),
-            model.node_dropout: torch.zeros(len(eval(self.args.layer_size))),
-        }
+    def get_sparsity_split(self):
+        split_file = os.path.join(self.path, 'sparsity.split')
+        split_uids, split_state = [], []
 
-    def as_train_feed_dict(self, model, batch_data):
+        try:
+            with open(split_file, 'r') as f:
+                lines = f.readlines()
+
+            for idx, line in enumerate(lines):
+                if idx % 2 == 0:
+                    split_state.append(line.strip())
+                else:
+                    split_uids.append(list(map(int, line.strip().split(' '))))
+            print('Loaded sparsity split.')
+
+        except Exception:
+            split_uids, split_state = self.create_sparsity_split()
+            with open(split_file, 'w') as f:
+                for state, uids in zip(split_state, split_uids):
+                    f.write(state + '\n')
+                    f.write(' '.join(map(str, uids)) + '\n')
+            print('Created sparsity split.')
+
+        return split_uids, split_state
+
+    def create_sparsity_split(self):
+        all_users_to_test = list(self.test_user_dict.keys())
+        user_n_iid = {}
+
+        for uid in all_users_to_test:
+            n_iids = len(self.train_user_dict[uid]) + len(self.test_user_dict[uid])
+            user_n_iid.setdefault(n_iids, []).append(uid)
+
+        split_uids, split_state = [], []
+        temp, n_rates, fold = [], 0, 4
+
+        for n_iids in sorted(user_n_iid):
+            temp.extend(user_n_iid[n_iids])
+            n_rates += n_iids * len(user_n_iid[n_iids])
+
+            if n_rates >= 0.25 * (self.n_train + self.n_test):
+                split_uids.append(temp)
+                state = f'#inter per user<=[{n_iids}], #users=[{len(temp)}], #all rates=[{n_rates}]'
+                split_state.append(state)
+                print(state)
+
+                temp, n_rates = [], 0
+                fold -= 1
+
+            if not temp:
+                continue
+
+            split_uids.append(temp)
+            state = f'#inter per user<=[{n_iids}], #users=[{len(temp)}], #all rates=[{n_rates}]'
+            split_state.append(state)
+            print(state)
+
+        return split_uids, split_state
+
+    def __len__(self):
+        # number of existing users after the preprocessing described in the paper,
+        # determines the length of the training dataset, for which a positive an negative are extracted
+        return len(self.exist_users)
+
+    ##_generate_train_cf_batch
+    def __getitem__(self, idx):
+        """
+        if self.batch_size <= self.n_users:
+            user = rd.sample(self.exist_users, self.batch_size)
+        else:
+            users = [rd.choice(self.exist_users) for _ in range(self.batch_size)]
+        """
+
+        def sample_pos_items_for_u(u, num):
+            pos_items = self.train_user_dict[u]
+            n_pos_items = len(pos_items)
+            pos_batch = []
+            while True:
+                if len(pos_batch) == num: break
+                pos_id = np.random.randint(low=0, high=n_pos_items, size=1)[0]
+                pos_i_id = pos_items[pos_id]
+
+                if pos_i_id not in pos_batch:
+                    pos_batch.append(pos_i_id)
+            return pos_batch
+
+        def sample_neg_items_for_u(u, num):
+            neg_items = []
+            while True:
+                if len(neg_items) == num: break
+                neg_i_id = np.random.randint(low=0, high=self.n_items, size=1)[0]
+
+                if neg_i_id not in self.train_user_dict[u] and neg_i_id not in neg_items:
+                    neg_items.append(neg_i_id)
+            return neg_items
+
+        """
+        pos_items, neg_items = [], []
+        for u in users:
+            pos_items += sample_pos_items_for_u(u, 1)
+            neg_items += sample_neg_items_for_u(u, 1)
+        """
+        u = self.exist_users[idx]
+        pos_item = sample_pos_items_for_u(u, 1)
+        neg_item = sample_neg_items_for_u(u, 1)
+        if len(pos_item) == 1:
+            pos_item = pos_item[0]
+        if len(neg_item) == 1:
+            neg_item = neg_item[0]
+
+        if self.batch_style_id == 0:
+            return u, pos_item, neg_item
+        else:
+            return {'users': u, 'pos_items': pos_item,
+                    'neg_items': neg_item}  # u, pos_item, neg_item #users, pos_items, neg_items
+
+
+    def prepare_train_data_as_feed_dict(self, batch_data):
+        # Ensure batch_data is in dictionary format
+        feed_dict = {}
         if self.batch_style_id == 0:
             users, pos_items, neg_items = batch_data
-            batch_data = {'users': users, 'pos_items': pos_items, 'neg_items': neg_items}
+            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = users, pos_items, neg_items
+        else:
+            return batch_data
+        return feed_dict
 
-        return {
-            model.users: torch.tensor(batch_data['users']),
-            model.pos_items: torch.tensor(batch_data['pos_items']),
-            model.neg_items: torch.tensor(batch_data['neg_items']),
-            model.mess_dropout: torch.tensor(eval(self.args.mess_dropout)),
-            model.node_dropout: torch.tensor(eval(self.args.node_dropout)),
-        }
+    def prepare_test_data_as_feed_dict(self, batch_data):
+        feed_dict = {}
+        if self.batch_style_id == 0:
+            users, pos_items, neg_items = batch_data
+            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = users, pos_items, neg_items
+        else:
+            return batch_data
+        return feed_dict
+        '''
+        # Ensure batch_data is in dictionary format
+        if self.batch_style_id == 0:
+            users, pos_items, neg_items = batch_data
+        else:
+            users = batch_data['users']
+            pos_items = batch_data['pos_items']
+            neg_items = batch_data['neg_items']
+        return users, pos_items, neg_items
+        '''
 
-    def as_train_A_feed_dict(self, model, batch_data):
+
+    def prepare_train_data_kge_as_feed_dict(self, batch_data):
+        feed_dict = {}
         if self.batch_style_id == 0:
             heads, relations, pos_tails, neg_tails = batch_data
-            batch_data = {'heads': heads, 'relations': relations, 'pos_tails': pos_tails, 'neg_tails': neg_tails}
+            feed_dict['heads'], feed_dict['relations'], feed_dict['pos_tails'], feed_dict['neg_tails'] = heads, relations, pos_tails, neg_tails
+        else:
+            return batch_data
+        return feed_dict
 
-        return {
-            model.h: torch.tensor(batch_data['heads']),
-            model.r: torch.tensor(batch_data['relations']),
-            model.pos_t: torch.tensor(batch_data['pos_tails']),
-            model.neg_t: torch.tensor(batch_data['neg_tails']),
-        }

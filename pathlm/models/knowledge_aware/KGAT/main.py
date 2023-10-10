@@ -57,13 +57,11 @@ if __name__ == '__main__':
     g = torch.Generator(device='cpu')
     g.manual_seed(2023)
 
-    kgat_a_ds = KGAT_loader(args=args, path=DATA_DIR[args.dataset])
-    kgat_ds = KGATStyleDataset(args=args, path=DATA_DIR[args.dataset])
-    data_generator['A_dataset'] = kgat_a_ds
-    data_generator['dataset'] = kgat_ds
-    data_generator['A_loader'] = DataLoader(kgat_a_ds,
-                                            batch_size=kgat_a_ds.batch_size_kg,
-                                            sampler=RandomSampler(kgat_a_ds,
+    data_generator['kg_augmented_dataset'] = KGAT_loader(args=args, path=DATA_DIR[args.dataset])
+    data_generator['dataset'] = KGATStyleDataset(args=args, path=DATA_DIR[args.dataset])
+    data_generator['kg_augmented_dataloader'] = DataLoader(data_generator['kg_augmented_dataset'],
+                                            batch_size=data_generator['kg_augmented_dataset'].batch_size_kg,
+                                            sampler=RandomSampler(data_generator['kg_augmented_dataset'],
                                                                   replacement=True,
                                                                   generator=g) if args.with_replacement else None,
                                             shuffle=False if args.with_replacement else True,
@@ -71,9 +69,9 @@ if __name__ == '__main__':
                                             drop_last=True,
                                             persistent_workers=True
                                             )
-    data_generator['loader'] = DataLoader(kgat_ds,
-                                          batch_size=kgat_ds.batch_size,
-                                          sampler=RandomSampler(kgat_ds,
+    data_generator['loader'] = DataLoader(data_generator['dataset'],
+                                          batch_size=data_generator['dataset'].batch_size,
+                                          sampler=RandomSampler(data_generator['dataset'],
                                                                 replacement=True,
                                                                 generator=g) if args.with_replacement else None,
                                           shuffle=False if args.with_replacement else True,
@@ -95,7 +93,7 @@ if __name__ == '__main__':
     }
 
     if args.model_type in ['kgat', 'cfkg']:
-        key = 'A_dataset' if args.model_type == 'kgat' else 'dataset'
+        key = 'kg_augmented_dataset' if args.model_type == 'kgat' else 'dataset'
         config['A_in'] = sum(data_generator[key].lap_list)
         config['all_h_list'] = data_generator[key].all_h_list
         config['all_r_list'] = data_generator[key].all_r_list
@@ -121,7 +119,7 @@ if __name__ == '__main__':
         n_batch = data_generator['dataset'].n_train // args.batch_size + 1
 
         loader_iter = iter(data_generator['loader'])
-        loader_A_iter = iter(data_generator['A_loader']) if 'A_loader' in data_generator else None
+        loader_A_iter = iter(data_generator['kg_augmented_dataloader']) if 'kg_augmented_dataloader' in data_generator else None
 
         for idx in range(n_batch):
             try:
@@ -130,13 +128,9 @@ if __name__ == '__main__':
                 loader_iter = iter(data_generator['loader'])
                 batch_data = next(loader_iter)
 
-            users, pos_items, neg_items = data_generator['dataset'].prepare_train_data(batch_data)
+            feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
 
-            optimizer.zero_grad()
-            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model(users, pos_items, neg_items)
-            batch_loss.backward()
-            optimizer.step()
-
+            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
             loss += batch_loss.item()
             base_loss += batch_base_loss.item()
             kge_loss += batch_kge_loss.item()
@@ -151,25 +145,22 @@ if __name__ == '__main__':
         Alternative Training for KGAT:
         ... phase 2: to train the KGE method & update the attentive Laplacian matrix.
         """
-        n_A_batch = len(data_generator['A_dataset'].all_h_list) // args.batch_size_kg + 1
+        n_A_batch = len(data_generator['kg_augmented_dataset'].all_h_list) // args.batch_size_kg + 1
 
         if args.use_kge is True:
             # using KGE method (knowledge graph embedding).
             train_start = time()
-            loader_A_iter = iter(data_generator['A_loader'])
+            loader_A_iter = iter(data_generator['kg_augmented_dataloader'])
             for idx in range(n_A_batch):
                 try:
                     A_batch_data = next(loader_A_iter)
                 except StopIteration:
-                    loader_A_iter = iter(data_generator['A_loader'])
+                    loader_A_iter = iter(data_generator['kg_augmented_dataloader'])
                     A_batch_data = next(loader_A_iter)
 
-                feed_dict = data_generator['A_dataset'].as_train_A_feed_dict(model, A_batch_data)
-
-                optimizer.zero_grad()
-                batch_loss, batch_kge_loss, batch_reg_loss = model.train_A(feed_dict)
-                batch_loss.backward()
-                optimizer.step()
+                #heads, relations, pos_tails, neg_tails = (data_generator['kg_augmented_dataset'].prepare_train_data_kge(A_batch_data))
+                feed_dict = data_generator['kg_augmented_dataset'].prepare_train_data_kge_as_feed_dict(A_batch_data)
+                batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='kge')
 
                 loss += batch_loss.item()
                 kge_loss += batch_kge_loss.item()
