@@ -17,7 +17,7 @@ from pathlm.datasets.kgat_dataset import KGATStyleDataset
 
 
 class KGAT_loader(KGATStyleDataset):
-    def __init__(self, args, path, batch_style='list'):
+    def __init__(self, args, path, batch_style='map'):
         super().__init__(args, path, batch_style)
 
         # Generate the sparse adjacency matrices for user-item interaction & relational kg data.
@@ -158,7 +158,7 @@ class KGAT_loader(KGATStyleDataset):
         def sample_pos_triples_for_h(h, num):
             pos_triples = self.all_kg_dict[h]
             sampled_triples = random.sample(pos_triples, num)
-            pos_rs, pos_ts = zip(*sampled_triples)
+            pos_ts, pos_rs = zip(*sampled_triples)
             return list(pos_rs), list(pos_ts)
 
         def sample_neg_triples_for_h(h, r, num):
@@ -234,64 +234,6 @@ class KGAT_loader(KGATStyleDataset):
             print(state)
 
         return split_uids, split_state
-
-    def __len__(self):
-        # number of existing users after the preprocessing described in the paper,
-        # determines the length of the training dataset, for which a positive an negative are extracted
-        return len(self.exist_users)
-
-    ##_generate_train_cf_batch
-    def __getitem__(self, idx):
-        """
-        if self.batch_size <= self.n_users:
-            user = rd.sample(self.exist_users, self.batch_size)
-        else:
-            users = [rd.choice(self.exist_users) for _ in range(self.batch_size)]
-        """
-
-        def sample_pos_items_for_u(u, num):
-            pos_items = self.train_user_dict[u]
-            n_pos_items = len(pos_items)
-            pos_batch = []
-            while True:
-                if len(pos_batch) == num: break
-                pos_id = np.random.randint(low=0, high=n_pos_items, size=1)[0]
-                pos_i_id = pos_items[pos_id]
-
-                if pos_i_id not in pos_batch:
-                    pos_batch.append(pos_i_id)
-            return pos_batch
-
-        def sample_neg_items_for_u(u, num):
-            neg_items = []
-            while True:
-                if len(neg_items) == num: break
-                neg_i_id = np.random.randint(low=0, high=self.n_items, size=1)[0]
-
-                if neg_i_id not in self.train_user_dict[u] and neg_i_id not in neg_items:
-                    neg_items.append(neg_i_id)
-            return neg_items
-
-        """
-        pos_items, neg_items = [], []
-        for u in users:
-            pos_items += sample_pos_items_for_u(u, 1)
-            neg_items += sample_neg_items_for_u(u, 1)
-        """
-        u = self.exist_users[idx]
-        pos_item = sample_pos_items_for_u(u, 1)
-        neg_item = sample_neg_items_for_u(u, 1)
-        if len(pos_item) == 1:
-            pos_item = pos_item[0]
-        if len(neg_item) == 1:
-            neg_item = neg_item[0]
-
-        if self.batch_style_id == 0:
-            return u, pos_item, neg_item
-        else:
-            return {'users': u, 'pos_items': pos_item,
-                    'neg_items': neg_item}  # u, pos_item, neg_item #users, pos_items, neg_items
-
 
     def prepare_train_data_as_feed_dict(self, batch_data):
         # Ensure batch_data is in dictionary format

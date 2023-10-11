@@ -157,11 +157,9 @@ class KGAT(nn.Module):
     Compute Knowledge Graph Embeddings via TransR.
     """
     def _forward_phase_II(self, h, r, pos_t,neg_t):
-        h_e, r_e, pos_t_e, neg_t_e = self._get_kg_inference(h, r, pos_t, neg_t)
-        A_kg_score = self._generate_transE_score(h=h, t=pos_t, r=r)
-        A_out = self._create_attentive_A_out()
-
-        return h_e, r_e, pos_t_e, neg_t_e, A_kg_score, A_out
+        self.h_e, self.r_e, self.pos_t_e, self.neg_t_e = self._get_kg_inference(h, r, pos_t, neg_t)
+        self.A_kg_score = self._generate_transE_score(h=h, t=pos_t, r=r)
+        self.A_out = self._create_attentive_A_out()
 
     def _get_kg_inference(self, h, r, pos_t, neg_t):
         embeddings = torch.cat([self.user_embed, self.entity_embed], dim=0)
@@ -368,7 +366,6 @@ class KGAT(nn.Module):
     """
     Update the attentive laplacian matrix.
     """
-
     def update_attentive_A(self):
         fold_len = len(self.all_h_list) // self.n_fold
         kg_score = []

@@ -29,8 +29,9 @@ if __name__ == '__main__':
 
     args = parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
-        else 'cpu')  )
+    #device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
+     #   else 'cpu')  )
+    device = 'cpu'
     args.device = device
 
     os.makedirs(TMP_DIR[args.dataset], exist_ok=True)
@@ -121,24 +122,24 @@ if __name__ == '__main__':
         loader_iter = iter(data_generator['loader'])
         loader_A_iter = iter(data_generator['kg_augmented_dataloader']) if 'kg_augmented_dataloader' in data_generator else None
 
-        for idx in range(n_batch):
-            try:
-                batch_data = next(loader_iter)
-            except StopIteration:
-                loader_iter = iter(data_generator['loader'])
-                batch_data = next(loader_iter)
-
-            feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
-
-            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
-            loss += batch_loss.item()
-            base_loss += batch_base_loss.item()
-            kge_loss += batch_kge_loss.item()
-            reg_loss += batch_reg_loss.item()
-
-        if math.isnan(loss):
-            print('ERROR: loss@phase1 is nan.')
-            sys.exit()
+        #for idx in range(n_batch):
+        #    try:
+        #        batch_data = next(loader_iter)
+        #    except StopIteration:
+        #        loader_iter = iter(data_generator['loader'])
+        #        batch_data = next(loader_iter)
+#
+        #    feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
+#
+        #    batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
+        #    loss += batch_loss.item()
+        #    base_loss += batch_base_loss.item()
+        #    kge_loss += batch_kge_loss.item()
+        #    reg_loss += batch_reg_loss.item()
+#
+        #if math.isnan(loss):
+        #    print('ERROR: loss@phase1 is nan.')
+        #    sys.exit()
 
         """
         *********************************************************
@@ -148,6 +149,7 @@ if __name__ == '__main__':
         n_A_batch = len(data_generator['kg_augmented_dataset'].all_h_list) // args.batch_size_kg + 1
 
         if args.use_kge is True:
+            print('Use KGE method (knowledge graph embedding).')
             # using KGE method (knowledge graph embedding).
             train_start = time()
             loader_A_iter = iter(data_generator['kg_augmented_dataloader'])
@@ -169,6 +171,7 @@ if __name__ == '__main__':
             train_time += time() - train_start
 
         if args.use_att is True:
+            print("Updating attentive laplacian matrix.")
             # updating attentive laplacian matrix.
             model.update_attentive_A()
 
