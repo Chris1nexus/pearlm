@@ -31,15 +31,17 @@ def parse_args():
                         help='CF Embedding size.')
     parser.add_argument('--kge_size', type=int, default=64,
                         help='KG Embedding size.')
-    parser.add_argument('--layer_size', nargs='?', default='[64]',
+    parser.add_argument('--layer_size', nargs='?', default='[64,32,16]',
                         help='Output sizes of every layer')
 
     parser.add_argument('--batch_size', type=int, default=1024,
                         help='CF batch size.')
+    parser.add_argument('--test_batch_size', type=int, default=1024,
+                        help='test batch size.')
     parser.add_argument('--batch_size_kg', type=int, default=2048,
                         help='KG batch size.')
 
-    parser.add_argument('--regs', nargs='?', default='[1e-5,1e-5,1e-2]',
+    parser.add_argument('--regs', nargs='?', default='[1e-5,1e-5]',
                         help='Regularization for user and item embeddings.')
     parser.add_argument('--lr', type=float, default=0.0001,
                         help='Learning rate.')
@@ -52,7 +54,7 @@ def parse_args():
                         help='Specify a loss type from {kgat, bprmf, fm, nfm, cke, cfkg}.')
     parser.add_argument('--adj_type', nargs='?', default='si',
                         help='Specify the type of the adjacency (laplacian) matrix from {bi, si}.')
-    parser.add_argument('--alg_type', nargs='?', default='kgat',
+    parser.add_argument('--alg_type', nargs='?', default='bi',
                         help='Specify the type of the graph convolutional layer from {bi, gcn, graphsage}.')
     parser.add_argument('--adj_uni_type', nargs='?', default='sum',
                         help='Specify a loss type (uni, sum).')
@@ -62,10 +64,10 @@ def parse_args():
 
     parser.add_argument('--node_dropout', nargs='?', default='[0.1]',
                         help='Keep probability w.r.t. node dropout (i.e., 1-dropout_ratio) for each deep layer. 1: no dropout.')
-    parser.add_argument('--mess_dropout', nargs='?', default='[0.1]',
+    parser.add_argument('--mess_dropout', nargs='?', default='[0.1,0.1,0.1]',
                         help='Keep probability w.r.t. message dropout (i.e., 1-dropout_ratio) for each deep layer. 1: no dropout.')
 
-    parser.add_argument('--Ks', nargs='?', default='[100]',
+    parser.add_argument('--Ks', nargs='?', default='[10]',
                         help='Output sizes of every layer')
 
     parser.add_argument('--save_flag', type=int, default=1,

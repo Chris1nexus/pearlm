@@ -33,7 +33,7 @@ class KGATStyleDataset(Dataset):
         self.kg_data, self.kg_dict, self.relation_dict = self._load_kg(os.path.join(path, 'kg_final.txt'))
 
         # Print dataset info
-        self.batch_size_kg = self.n_triples // (self.n_train // self.batch_size)
+        self.batch_size_kg = self.n_triples // (self.n_train // args.batch_size_kg)
         self._print_data_info()
 
         self.layer_size = eval(args.layer_size)[0]
@@ -102,7 +102,7 @@ class KGATStyleDataset(Dataset):
             print('Loaded sparsity split.')
 
         except Exception:
-            split_uids, split_state = self.create_sparsity_split()
+            split_uids, split_state = self.load_or_create_sparsity_split()
             with open(split_file, 'w') as f:
                 for state, uids in zip(split_state, split_uids):
                     f.write(state + '\n')
@@ -111,7 +111,7 @@ class KGATStyleDataset(Dataset):
 
         return split_uids, split_state
 
-    def create_sparsity_split(self):
+    def load_or_create_sparsity_split(self):
         all_users_to_test = list(self.test_user_dict.keys())
         user_n_iid = {}
 

@@ -7,10 +7,12 @@ Wang Xiang et al. KGAT: Knowledge Graph Attention Network for Recommendation. In
 import math
 import multiprocessing
 import pickle
+from itertools import cycle
 
 import numpy as np
 from tqdm import tqdm
 
+from pathlm.models.traditional.traditional_utils import early_stopping
 from pathlm.models.wadb_utils import MetricsLogger
 from batch_test import *
 from time import time
@@ -36,17 +38,17 @@ if __name__ == '__main__':
 
     os.makedirs(TMP_DIR[args.dataset], exist_ok=True)
 
-    metrics = MetricsLogger(args.wandb_entity if args.wandb else None, 
-                            f'{MODEL}_{args.dataset}',
-                            config=args)
-    metrics.register('train_loss')
-    metrics.register('train_base_loss')
-    metrics.register('train_reg_loss')
-    metrics.register('train_kge_loss')
-    metrics.register('ndcg')
-    metrics.register('hit')
-    metrics.register('recall')     
-    metrics.register('precision')
+    #metrics = MetricsLogger(args.wandb_entity if args.wandb else None,
+    #                        f'{MODEL}_{args.dataset}',
+    #                        config=args)
+    #metrics.register('train_loss')
+    #metrics.register('train_base_loss')
+    #metrics.register('train_reg_loss')
+    #metrics.register('train_kge_loss')
+    #metrics.register('ndcg')
+    #metrics.register('hit')
+    #metrics.register('recall')
+    #metrics.register('precision')
    
     """
     *********************************************************
@@ -95,7 +97,14 @@ if __name__ == '__main__':
 
     if args.model_type in ['kgat', 'cfkg']:
         key = 'kg_augmented_dataset' if args.model_type == 'kgat' else 'dataset'
-        config['A_in'] = sum(data_generator[key].lap_list)
+        def sum_sparse_tensors(tensor_list):
+            # Initialize with the first tensor
+            result = tensor_list[0].clone()
+            # Iterate over the rest of the tensors and add them
+            for tensor in tensor_list[1:]:
+                result = result + tensor
+            return result
+        config['A_in'] = sum_sparse_tensors(data_generator[key].lap_list)
         config['all_h_list'] = data_generator[key].all_h_list
         config['all_r_list'] = data_generator[key].all_r_list
         config['all_t_list'] = data_generator[key].all_t_list
@@ -119,27 +128,20 @@ if __name__ == '__main__':
         loss, base_loss, kge_loss, reg_loss = 0., 0., 0., 0.
         n_batch = data_generator['dataset'].n_train // args.batch_size + 1
 
-        loader_iter = iter(data_generator['loader'])
-        loader_A_iter = iter(data_generator['kg_augmented_dataloader']) if 'kg_augmented_dataloader' in data_generator else None
-
-        #for idx in range(n_batch):
-        #    try:
-        #        batch_data = next(loader_iter)
-        #    except StopIteration:
-        #        loader_iter = iter(data_generator['loader'])
-        #        batch_data = next(loader_iter)
+        loader_cycle= cycle(data_generator['loader'])
+        for idx in range(n_batch):
+            batch_data = next(loader_cycle)
+            feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
 #
-        #    feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
+            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
+            loss += batch_loss.item()
+            base_loss += batch_base_loss.item()
+            kge_loss += batch_kge_loss.item()
+            reg_loss += batch_reg_loss.item()
 #
-        #    batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
-        #    loss += batch_loss.item()
-        #    base_loss += batch_base_loss.item()
-        #    kge_loss += batch_kge_loss.item()
-        #    reg_loss += batch_reg_loss.item()
-#
-        #if math.isnan(loss):
-        #    print('ERROR: loss@phase1 is nan.')
-        #    sys.exit()
+        if math.isnan(loss):
+            print('ERROR: loss@phase1 is nan.')
+            sys.exit()
 
         """
         *********************************************************
@@ -147,22 +149,17 @@ if __name__ == '__main__':
         ... phase 2: to train the KGE method & update the attentive Laplacian matrix.
         """
         n_A_batch = len(data_generator['kg_augmented_dataset'].all_h_list) // args.batch_size_kg + 1
-
         if args.use_kge is True:
             print('Use KGE method (knowledge graph embedding).')
             # using KGE method (knowledge graph embedding).
             train_start = time()
-            loader_A_iter = iter(data_generator['kg_augmented_dataloader'])
+            loader_A_cycle = cycle(data_generator['kg_augmented_dataloader'])
             for idx in range(n_A_batch):
-                try:
-                    A_batch_data = next(loader_A_iter)
-                except StopIteration:
-                    loader_A_iter = iter(data_generator['kg_augmented_dataloader'])
-                    A_batch_data = next(loader_A_iter)
+                A_batch_data = next(loader_A_cycle)
 
                 #heads, relations, pos_tails, neg_tails = (data_generator['kg_augmented_dataset'].prepare_train_data_kge(A_batch_data))
-                feed_dict = data_generator['kg_augmented_dataset'].prepare_train_data_kge_as_feed_dict(A_batch_data)
-                batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='kge')
+                #feed_dict = data_generator['kg_augmented_dataset'].prepare_train_data_kge_as_feed_dict(A_batch_data)
+                batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(A_batch_data, mode='kge')
 
                 loss += batch_loss.item()
                 kge_loss += batch_kge_loss.item()
@@ -173,7 +170,7 @@ if __name__ == '__main__':
         if args.use_att is True:
             print("Updating attentive laplacian matrix.")
             # updating attentive laplacian matrix.
-            model.update_attentive_A()
+            model(None, mode='update_att')
 
         if math.isnan(loss):
             print('ERROR: loss@phase2 is nan.')
@@ -182,7 +179,7 @@ if __name__ == '__main__':
         show_step = 1
         if (epoch + 1) % show_step != 0:
             if args.verbose > 0 and epoch % args.verbose == 0:
-                perf_str = f'Epoch {epoch} [{time() - t1:.1f}s]: train==[{loss:.5f}={base_loss:.5f} + {kge_loss:.5f} + {reg_loss:.5f}]'
+                perf_str = f'Epoch {epoch} [{time() - t1:.1f}s]: train==[Cumulative loss: {loss:.5f}= base loss: {base_loss:.5f} + kge_loss: {kge_loss:.5f} + reg_loss: {reg_loss:.5f}]'
                 print(perf_str)
             continue
 
@@ -193,7 +190,7 @@ if __name__ == '__main__':
         t2 = time()
         users_to_test = list(data_generator['dataset'].test_user_dict.keys())
 
-        ret, top_k = test(users_to_test, drop_flag=False, batch_test_flag=batch_test_flag)
+        ret, top_k = test(args, model, users_to_test, data_generator)
         os.makedirs(LOG_DATASET_DIR[args.dataset], exist_ok=True)
         topk_path = f'{LOG_DATASET_DIR[args.dataset]}/item_topk.pkl'
         with open(topk_path, 'wb') as f:
@@ -206,37 +203,40 @@ if __name__ == '__main__':
         """
         test_time = 0
         t3 = time()
-        metrics.log('train_loss', loss.item())
-        metrics.log('train_base_loss', base_loss.item())
-        metrics.log('train_kge_loss', kge_loss.item())
-        metrics.log('train_reg_loss', reg_loss.item())
-        metrics.log('valid_ndcg', ret['ndcg'].item())
-        metrics.log('valid_hit', ret['hit_ratio'].item())
-        metrics.log('valid_recall', ret['recall'].item())
-        metrics.log('valid_precision', ret['precision'].item())
-        metrics.push(['train_loss', 'train_base_loss', 'train_kge_loss', 'train_reg_loss',
-                      'valid_ndcg', 'valid_hit', 'valid_recall', 'valid_precision'])
-
+        #metrics.log('train_loss', loss)
+        #metrics.log('train_base_loss', base_loss)
+        #metrics.log('train_kge_loss', kge_loss)
+        #metrics.log('train_reg_loss', reg_loss)
+        #metrics.log('valid_ndcg', ret['ndcg'])
+        #metrics.log('valid_hit', ret['hit_ratio'])
+        #metrics.log('valid_recall', ret['recall'])
+        #metrics.log('valid_precision', ret['precision'])
+        #metrics.push(['train_loss', 'train_base_loss', 'train_kge_loss', 'train_reg_loss',
+        #              'valid_ndcg', 'valid_hit', 'valid_recall', 'valid_precision'])
+        Ks = eval(args.Ks)
         loss_loger.append(loss)
-        rec_loger.append(ret['recall'])
-        pre_loger.append(ret['precision'])
-        ndcg_loger.append(ret['ndcg'])
-        hit_loger.append(ret['hit_ratio'])
+        rec_loger.append(ret[Ks[0]]['recall'])
+        pre_loger.append(ret[Ks[0]]['precision'])
+        ndcg_loger.append(ret[Ks[0]]['ndcg'])
+        #hit_loger.append(ret['hit_ratio'])
         metrics_logs = {}
-        for metric_name, metric_values in ret.items():
-            if metric_name != 'auc':
-                for idx, k in enumerate(Ks):
-                    metrics_logs[f'{metric_name}@{k}'] = metric_values[idx]
+
+        for idx, k in enumerate(Ks):
+            for metric_name, metric_value in ret[k].items():
+                if metric_name != 'auc':
+                    metrics_logs[f'{metric_name}@{k}'] = metric_value
         test_time += t3 - t2
         metrics_logs['test_time'] = test_time
 
         if args.verbose > 0:
-            perf_str = f'Epoch {epoch} [{t2 - t1:.1f}s + {t3 - t2:.1f}s]: train==[{loss:.5f}={base_loss:.5f} + {kge_loss:.5f} + {reg_loss:.5f}], recall=[{ret["recall"][0]:.5f}, {ret["recall"][-1]:.5f}], precision=[{ret["precision"][0]:.5f}, {ret["precision"][-1]:.5f}], hit=[{ret["hit_ratio"][0]:.5f}, {ret["hit_ratio"][-1]:.5f}], ndcg=[{ret["ndcg"][0]:.5f}, {ret["ndcg"][-1]:.5f}]'
+            ndcg = ret[k]['ndcg']
+            perf_str = (f'Epoch {epoch} [{t2 - t1:.1f}s + {t3 - t2:.1f}s]: train==[{loss:.5f}={base_loss:.5f} + '
+                        f'{kge_loss:.5f} + {reg_loss:.5f} + {ndcg:.2f}')
             print(perf_str)
 
-        cur_best_pre_0, stopping_step, should_stop = early_stopping(ret['ndcg'][0], cur_best_pre_0,
-                                                                    stopping_step, expected_order='acc',
-                                                                    flag_step=1000)
+        ##cur_best_pre_0, stopping_step, should_stop = early_stopping(ret[Ks[0]]['ndcg'], cur_best_pre_0,
+        ##                                                            stopping_step, expected_order='acc',
+         #                                                           flag_step=1000)
 
         # *********************************************************
         # early stopping when cur_best_pre_0 is decreasing for ten successive steps.
@@ -245,9 +245,9 @@ if __name__ == '__main__':
 
         # *********************************************************
         # save the user & item embeddings for pretraining.
-        torch.save(model.state_dict(), os.path.join(weights_save_path, f'weights_epoch_{epoch}.pth'))
-        print(f'save the weights in path: {weights_save_path}')
+        #torch.save(model.state_dict(), os.path.join(weights_save_path, f'weights_epoch_{epoch}.pth'))
+        #print(f'save the weights in path: {weights_save_path}')
 
-        metrics.write(TEST_METRICS_FILE_PATH[args.dataset])
+        #metrics.write(TEST_METRICS_FILE_PATH[args.dataset])
 
-        metrics.close_wandb()
+        #metrics.close_wandb()
