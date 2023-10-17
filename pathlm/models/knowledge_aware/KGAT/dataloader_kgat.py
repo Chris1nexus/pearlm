@@ -16,13 +16,12 @@ import collections
 from pathlm.datasets.kgat_dataset import KGATStyleDataset
 
 
-class KGAT_loader(KGATStyleDataset):
+class KGATLoader(KGATStyleDataset):
     def __init__(self, args, path, batch_style='map'):
         super().__init__(args, path, batch_style)
         self.batch_size_kg = args.batch_size_kg
         # Generate the sparse adjacency matrices for user-item interaction & relational kg data.
         self.adj_list, self.adj_r_list = self._get_relational_adj_list()
-
         # Generate the sparse laplacian matrices.
         self.lap_list = self._get_relational_lap_list()
 
@@ -33,20 +32,19 @@ class KGAT_loader(KGATStyleDataset):
 
         self.all_h_list, self.all_r_list, self.all_t_list, self.all_v_list = self._get_all_kg_data()
 
-    def _get_relational_adj_list(self) -> Tuple[List[torch.sparse_coo_tensor], List[int]]:
+    def _get_relational_adj_list(self) -> Tuple[List[torch.sparse.FloatTensor], List[int]]:
         """
         Construct adjacency matrices for ratings and relational triples.
 
         Returns:
             tuple: A tuple containing two lists - adjacency matrices list and relation list.
         """
-
         t1 = time()  # Start recording time
         adj_mat_list = []  # List to store adjacency matrices
         adj_r_list = []  # List to store relations
 
         def _np_mat2sp_adj(np_mat: np.ndarray, row_pre: int, col_pre: int) -> Tuple[
-            torch.sparse_coo_tensor, torch.sparse_coo_tensor]:
+            torch.sparse.FloatTensor, torch.sparse.FloatTensor]:
             """
             Convert a numpy matrix to two PyTorch sparse adjacency tensors.
 
@@ -70,8 +68,10 @@ class KGAT_loader(KGATStyleDataset):
             b_vals = torch.ones(len(b_rows))
 
             # Construct PyTorch sparse tensors
-            a_adj = torch.sparse_coo_tensor(indices=[a_rows, a_cols], values=a_vals, size=(n_all, n_all))
-            b_adj = torch.sparse_coo_tensor(indices=[b_rows, b_cols], values=b_vals, size=(n_all, n_all))
+            indices_a = torch.tensor(np.stack([a_rows, a_cols]), dtype=torch.long)
+            indices_b = torch.tensor(np.stack([b_rows, b_cols]), dtype=torch.long)
+            a_adj = torch.sparse_coo_tensor(indices=indices_a, values=a_vals, size=(n_all, n_all)).to(self.args.device)
+            b_adj = torch.sparse_coo_tensor(indices=indices_b, values=b_vals, size=(n_all, n_all)).to(self.args.device)
 
             return a_adj, b_adj
 
@@ -212,8 +212,6 @@ class KGAT_loader(KGATStyleDataset):
 
         return new_h_list, new_r_list, new_t_list, new_v_list
 
-
-
     def __len__(self) -> int:
         """
         Determine the number of existing users after the preprocessing.
@@ -249,7 +247,7 @@ class KGAT_loader(KGATStyleDataset):
             """
             pos_triples = self.all_kg_dict[h]
             sampled_triples = random.sample(pos_triples, num)
-            pos_rs, pos_ts = zip(*sampled_triples)
+            pos_ts, pos_rs = zip(*sampled_triples)
             return list(pos_rs), list(pos_ts)
 
         def sample_neg_triples_for_h(h: int, r: int, num: int) -> List[int]:
@@ -273,16 +271,12 @@ class KGAT_loader(KGATStyleDataset):
         pos_rs, pos_ts = sample_pos_triples_for_h(h, 1)
         neg_ts = sample_neg_triples_for_h(h, pos_rs[0], 1)
 
-        # Return based on batch_style_id
-        if self.batch_style_id == 0:
-            return h, pos_rs[0], pos_ts[0], neg_ts[0]
-        else:
-            return {
-                'heads': h,
-                'relations': pos_rs[0],
-                'pos_tails': pos_ts[0],
-                'neg_tails': neg_ts[0]
-            }
+        return {
+            'heads': h,
+            'relations': pos_rs[0],
+            'pos_tails': pos_ts[0],
+            'neg_tails': neg_ts[0]
+        }
 
     def get_sparsity_split(self):
         split_file = os.path.join(self.path, 'sparsity.split')
@@ -384,12 +378,3 @@ class KGAT_loader(KGATStyleDataset):
             'mess_dropout': [0.] * len(eval(self.args.layer_size)),
             'node_dropout': [0.] * len(eval(self.args.layer_size)),
         }
-
-    def prepare_train_data_kge_as_feed_dict(self, batch_data):
-        feed_dict = {}
-        if self.batch_style_id == 0:
-            heads, relations, pos_tails, neg_tails = batch_data
-            feed_dict['heads'], feed_dict['relations'], feed_dict['pos_tails'], feed_dict['neg_tails'] = heads, relations, pos_tails, neg_tails
-        else:
-            return batch_data
-        return feed_dict

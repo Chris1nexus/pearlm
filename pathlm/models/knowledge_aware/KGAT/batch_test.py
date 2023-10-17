@@ -12,7 +12,7 @@ from pathlm.datasets.data_utils import get_user_negatives
 from pathlm.datasets.kgat_dataset import KGATStyleDataset
 from pathlm.evaluation.eval_metrics import evaluate_rec_quality
 
-from loader_kgat import KGAT_loader
+from dataloader_kgat import KGATLoader
 from pathlm.models.knowledge_aware.KGAT.parser import parse_args
 from utils import *
 
@@ -73,7 +73,7 @@ if __name__ == '__main__':
     g = torch.Generator(device='cpu')
     g.manual_seed(MANUAL_SEED)
 
-    kgat_a_ds = KGAT_loader(args=args, path=DATA_DIR[args.dataset])
+    kgat_a_ds = KGATLoader(args=args, path=DATA_DIR[args.dataset])
     kgat_ds = KGATStyleDataset(args=args, path=DATA_DIR[args.dataset])
     data_generator['A_dataset'] = kgat_a_ds
     data_generator['dataset'] = kgat_ds

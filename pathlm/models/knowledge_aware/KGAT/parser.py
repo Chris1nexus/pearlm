@@ -38,7 +38,7 @@ def parse_args():
                         help='CF batch size.')
     parser.add_argument('--test_batch_size', type=int, default=1024,
                         help='test batch size.')
-    parser.add_argument('--batch_size_kg', type=int, default=2048,
+    parser.add_argument('--batch_size_kg', type=int, default=128,
                         help='KG batch size.')
 
     parser.add_argument('--regs', nargs='?', default='[1e-5,1e-5]',

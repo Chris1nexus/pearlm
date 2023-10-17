@@ -10,6 +10,9 @@ import pickle
 from itertools import cycle
 
 import numpy as np
+from torch.utils.data import default_collate
+
+from pathlm.utils import SEED
 from tqdm import tqdm
 
 from pathlm.models.traditional.traditional_utils import early_stopping
@@ -21,34 +24,23 @@ from KGAT import KGAT
 import sys
 from utils import *
 
-
+def move_to_gpu(batch):
+    return {key: value.to('cuda') for key, value in default_collate(batch).items()}
 
 
 if __name__ == '__main__':
     # Set random seeds
-    torch.manual_seed(2023)
-    np.random.seed(2023)
+    torch.manual_seed(SEED)
+    np.random.seed(SEED)
 
     args = parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    #device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
-     #   else 'cpu')  )
-    device = 'cpu'
+    device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
+        else 'cpu')  )
     args.device = device
+    torch.multiprocessing.set_start_method('spawn')
 
     os.makedirs(TMP_DIR[args.dataset], exist_ok=True)
-
-    #metrics = MetricsLogger(args.wandb_entity if args.wandb else None,
-    #                        f'{MODEL}_{args.dataset}',
-    #                        config=args)
-    #metrics.register('train_loss')
-    #metrics.register('train_base_loss')
-    #metrics.register('train_reg_loss')
-    #metrics.register('train_kge_loss')
-    #metrics.register('ndcg')
-    #metrics.register('hit')
-    #metrics.register('recall')
-    #metrics.register('precision')
    
     """
     *********************************************************
@@ -57,21 +49,22 @@ if __name__ == '__main__':
     train_cores = multiprocessing.cpu_count()
     test_cores = multiprocessing.cpu_count() // 2
     data_generator = {}
-    g = torch.Generator(device='cpu')
-    g.manual_seed(2023)
+    g = torch.Generator(device='cpu').manual_seed(SEED)
 
-    data_generator['kg_augmented_dataset'] = KGAT_loader(args=args, path=DATA_DIR[args.dataset])
+    data_generator['kg_augmented_dataset'] = KGATLoader(args=args, path=DATA_DIR[args.dataset])
     data_generator['dataset'] = KGATStyleDataset(args=args, path=DATA_DIR[args.dataset])
     data_generator['kg_augmented_dataloader'] = DataLoader(data_generator['kg_augmented_dataset'],
-                                            batch_size=data_generator['kg_augmented_dataset'].batch_size_kg,
-                                            sampler=RandomSampler(data_generator['kg_augmented_dataset'],
-                                                                  replacement=True,
-                                                                  generator=g) if args.with_replacement else None,
-                                            shuffle=False if args.with_replacement else True,
-                                            num_workers=train_cores,
-                                            drop_last=True,
-                                            persistent_workers=True
-                                            )
+                                                           batch_size=data_generator[
+                                                               'kg_augmented_dataset'].batch_size_kg,
+                                                           sampler=RandomSampler(data_generator['kg_augmented_dataset'],
+                                                                                 replacement=True,
+                                                                                 generator=g) if args.with_replacement else None,
+                                                           shuffle=False if args.with_replacement else True,
+                                                           num_workers=0,
+                                                           drop_last=True,
+                                                           persistent_workers=False,
+                                                              collate_fn=move_to_gpu
+                                                           )
     data_generator['loader'] = DataLoader(data_generator['dataset'],
                                           batch_size=data_generator['dataset'].batch_size,
                                           sampler=RandomSampler(data_generator['dataset'],
@@ -95,26 +88,30 @@ if __name__ == '__main__':
         'n_entities': data_generator['dataset'].n_entities
     }
 
-    if args.model_type in ['kgat', 'cfkg']:
-        key = 'kg_augmented_dataset' if args.model_type == 'kgat' else 'dataset'
-        def sum_sparse_tensors(tensor_list):
-            # Initialize with the first tensor
-            result = tensor_list[0].clone()
-            # Iterate over the rest of the tensors and add them
-            for tensor in tensor_list[1:]:
-                result = result + tensor
-            return result
-        config['A_in'] = sum_sparse_tensors(data_generator[key].lap_list)
-        config['all_h_list'] = data_generator[key].all_h_list
-        config['all_r_list'] = data_generator[key].all_r_list
-        config['all_t_list'] = data_generator[key].all_t_list
-        config['all_v_list'] = data_generator[key].all_v_list
-        config['n_relations'] = data_generator[key].n_relations
+    key =  'kg_augmented_dataset'
+    def sum_sparse_tensors(tensor_list):
+        # Initialize with the first tensor
+        result = tensor_list[0].clone()
+        # Iterate over the rest of the tensors and add them
+        for tensor in tensor_list[1:]:
+            result = result + tensor
+        return result
+
+    def sum_sparse_tensors_(sparse_tensor_list):
+        stacked_tensors = torch.stack(sparse_tensor_list, dim=0)
+        summed_tensor = torch.sparse.sum(stacked_tensors, dim=0)
+        return summed_tensor
+
+    config['A_in'] = sum_sparse_tensors_(data_generator[key].lap_list)
+    config['all_h_list'] = data_generator[key].all_h_list
+    config['all_r_list'] = data_generator[key].all_r_list
+    config['all_t_list'] = data_generator[key].all_t_list
+    config['all_v_list'] = data_generator[key].all_v_list
+    config['n_relations'] = data_generator[key].n_relations
 
     model = KGAT(data_config=config, pretrain_data=None, args=args).to(device)
-
     # Use PyTorch's save and load API
-    weights_save_path = os.path.join(TMP_DIR[args.dataset], "weights")
+    weights_save_path = os.path.join("weights")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -128,12 +125,10 @@ if __name__ == '__main__':
         loss, base_loss, kge_loss, reg_loss = 0., 0., 0., 0.
         n_batch = data_generator['dataset'].n_train // args.batch_size + 1
 
-        loader_cycle= cycle(data_generator['loader'])
+        loader_cycle = cycle(data_generator['loader'])
         for idx in range(n_batch):
             batch_data = next(loader_cycle)
-            feed_dict = data_generator['dataset'].prepare_train_data_as_feed_dict(batch_data)
-#
-            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(feed_dict, mode='rec')
+            batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(batch_data, mode='rec')
             loss += batch_loss.item()
             base_loss += batch_base_loss.item()
             kge_loss += batch_kge_loss.item()
@@ -142,13 +137,20 @@ if __name__ == '__main__':
         if math.isnan(loss):
             print('ERROR: loss@phase1 is nan.')
             sys.exit()
+        # Compute average losses over all batches
+        avg_loss = loss / n_batch
+        avg_base_loss = base_loss / n_batch
+        avg_kge_loss = kge_loss / n_batch
+        avg_reg_loss = reg_loss / n_batch
+        print(f"Epoch {epoch} [{time() - t1:.1f}s]: train==[Cumulative loss: {avg_loss:.5f}= base loss: {avg_base_loss:.5f} + kge_loss: {avg_kge_loss:.5f} + reg_loss: {avg_reg_loss:.5f}]")
+
 
         """
         *********************************************************
         Alternative Training for KGAT:
         ... phase 2: to train the KGE method & update the attentive Laplacian matrix.
         """
-        n_A_batch = len(data_generator['kg_augmented_dataset'].all_h_list) // args.batch_size_kg + 1
+        n_A_batch = args.batch_size_kg
         if args.use_kge is True:
             print('Use KGE method (knowledge graph embedding).')
             # using KGE method (knowledge graph embedding).
@@ -156,9 +158,6 @@ if __name__ == '__main__':
             loader_A_cycle = cycle(data_generator['kg_augmented_dataloader'])
             for idx in range(n_A_batch):
                 A_batch_data = next(loader_A_cycle)
-
-                #heads, relations, pos_tails, neg_tails = (data_generator['kg_augmented_dataset'].prepare_train_data_kge(A_batch_data))
-                #feed_dict = data_generator['kg_augmented_dataset'].prepare_train_data_kge_as_feed_dict(A_batch_data)
                 batch_loss, batch_base_loss, batch_kge_loss, batch_reg_loss = model.train_step(A_batch_data, mode='kge')
 
                 loss += batch_loss.item()

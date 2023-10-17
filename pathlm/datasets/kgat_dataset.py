@@ -33,7 +33,7 @@ class KGATStyleDataset(Dataset):
         self.kg_data, self.kg_dict, self.relation_dict = self._load_kg(os.path.join(path, 'kg_final.txt'))
 
         # Print dataset info
-        self.batch_size_kg = self.n_triples // (self.n_train // args.batch_size_kg)
+        self.batch_size_kg = args.batch_size_kg
         self._print_data_info()
 
         self.layer_size = eval(args.layer_size)[0]
@@ -194,22 +194,8 @@ class KGATStyleDataset(Dataset):
         if len(neg_item) == 1:
             neg_item = neg_item[0]
 
-
-        if self.batch_style_id == 0:
-            return u, pos_item, neg_item
-        else:
-            return {'users': u, 'pos_items': pos_item, 'neg_items':neg_item}#u, pos_item, neg_item #users, pos_items, neg_items
-
-
-    def prepare_train_data_as_feed_dict(self, batch_data):
-        # Ensure batch_data is in dictionary format
-        feed_dict = {}
-        if self.batch_style_id == 0:
-            users, pos_items, neg_items = batch_data
-            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = users, pos_items, neg_items
-        else:
-            return batch_data
-        return feed_dict
+        return {'users': u, 'pos_items': pos_item,
+                'neg_items':neg_item} #u, pos_item, neg_item #users, pos_items, neg_items
 
     def prepare_test_data_as_feed_dict(self, batch_data):
         feed_dict = {}
@@ -219,6 +205,7 @@ class KGATStyleDataset(Dataset):
         else:
             return batch_data
         return feed_dict
+
         '''
         # Ensure batch_data is in dictionary format
         if self.batch_style_id == 0:
