@@ -12,6 +12,7 @@ class BPRMF(nn.Module):
                  user_pre_embed=None, item_pre_embed=None):
 
         super(BPRMF, self).__init__()
+        self.name = 'bprmf'
         self.use_pretrain = args.use_pretrain
 
         self.n_users = n_users
