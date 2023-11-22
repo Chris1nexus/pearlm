@@ -8,7 +8,7 @@ from pathlm.knowledge_graphs.kg_macros import ML1M, LFM1M, CELL
 from pathlm.models.embeddings.kge_data_loader import KGEDataLoader
 from pathlm.models.embeddings.kge_utils import get_log_dir, get_logger, get_embedding_ckpt_rootdir
 from pathlm.models.embeddings.transe_model import TransE
-from pathlm.utils import set_seed
+from pathlm.utils import set_seed, SEED
 
 logger = None
 
@@ -59,10 +59,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', type=str, default=ML1M, help='One of {beauty, cd, cell, clothing}.')
     parser.add_argument('--name', type=str, default='transe', help='models name.')
-    parser.add_argument('--seed', type=int, default=123, help='random seed.')
+    parser.add_argument('--seed', type=int, default=SEED, help='random seed.')
     parser.add_argument('--gpu', type=str, default='0', help='gpu device.')
-    parser.add_argument('--epochs', type=int, default=1, help='number of epochs to train.')
-    parser.add_argument('--batch_size', type=int, default=256, help='batch size.')
+    parser.add_argument('--epochs', type=int, default=30, help='number of epochs to train.')
+    parser.add_argument('--batch_size', type=int, default=64, help='batch size.')
     parser.add_argument('--lr', type=float, default=0.5, help='learning rate.')
     parser.add_argument('--weight_decay', type=float, default=0, help='weight decay for adam.')
     parser.add_argument('--l2_lambda', type=float, default=0, help='l2 lambda')
