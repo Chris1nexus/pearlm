@@ -1,154 +1,200 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-
-def _L2_loss_mean(x):
-    return torch.mean(torch.sum(torch.pow(x, 2), dim=1, keepdim=False) / 2.)
+from torch import optim
 
 
 class CKE(nn.Module):
-
-    def __init__(self, args,
-                 n_users, n_items, n_entities, n_relations,
-                 user_pre_embed=None, item_pre_embed=None):
-
+    def __init__(self, data_config, pretrain_data, args):
         super(CKE, self).__init__()
-        self.use_pretrain = args.use_pretrain
+        self.device = args.device
+        self._parse_args(data_config, pretrain_data, args)
+        self._build_model()
+        self.optimizer = optim.Adam(self.parameters(), lr=self.lr)
 
-        self.n_users = n_users
-        self.n_items = n_items
-        self.n_entities = n_entities
-        self.n_relations = n_relations
+    def _parse_args(self, data_config, pretrain_data, args):
+        self.model_type = 'cke'
+        self.pretrain_data = pretrain_data
 
-        self.embed_dim = args.embed_dim
-        self.relation_dim = args.relation_dim
+        self.n_users = data_config['n_users']
+        self.n_items = data_config['n_items']
+        self.n_entities = data_config['n_entities']
+        self.n_relations = data_config['n_relations']
 
-        self.cf_l2loss_lambda = args.cf_l2loss_lambda
-        self.kg_l2loss_lambda = args.kg_l2loss_lambda
+        self.lr = args.lr
+        self.emb_dim = args.embed_size
+        self.batch_size = args.batch_size
+        self.kge_dim = args.kge_size
+        self.regs = eval(args.regs)
+        self.verbose = args.verbose
 
-        self.user_embed = nn.Embedding(self.n_users, self.embed_dim)
-        self.item_embed = nn.Embedding(self.n_items, self.embed_dim)
-
-        self.entity_embed = nn.Embedding(self.n_entities, self.embed_dim)
-        self.relation_embed = nn.Embedding(self.n_relations, self.relation_dim)
-        self.trans_M = nn.Parameter(torch.Tensor(self.n_relations, self.embed_dim, self.relation_dim))
-
-        if (self.use_pretrain == 1) and (user_pre_embed is not None):
-            self.user_embed.weight = nn.Parameter(user_pre_embed)
+    def _build_model(self):
+        if self.pretrain_data is None:
+            self.user_embed = nn.Embedding(self.n_users, self.emb_dim)
+            nn.init.xavier_uniform_(self.user_embed.weight.data)
+            self.item_embed = nn.Embedding(self.n_items, self.emb_dim)
+            nn.init.xavier_uniform_(self.item_embed.weight.data)
+            print('using xavier initialization')
         else:
-            nn.init.xavier_uniform_(self.user_embed.weight)
+            self.user_embed = nn.Embedding.from_pretrained(torch.tensor(self.pretrain_data['user_embed']), freeze=False)
+            self.item_embed = nn.Embedding.from_pretrained(torch.tensor(self.pretrain_data['item_embed']), freeze=False)
+            print('using pretrained initialization')
 
-        if (self.use_pretrain == 1) and (item_pre_embed is not None):
-            self.item_embed.weight = nn.Parameter(item_pre_embed)
+        self.kg_entity_embed = nn.Embedding(self.n_entities, self.emb_dim)
+        nn.init.xavier_uniform_(self.kg_entity_embed.weight.data)
+        self.kg_relation_embed = nn.Embedding(self.n_relations, self.kge_dim)
+        nn.init.xavier_uniform_(self.kg_relation_embed.weight.data)
+        self.trans_W = nn.Parameter(torch.Tensor(self.n_relations, self.emb_dim, self.kge_dim))
+        nn.init.xavier_normal_(self.trans_W)
+
+    def _get_kg_inference(self, h, r, pos_t, neg_t):
+        # Embedding lookups
+        h_e = self.kg_entity_embed(h)
+        pos_t_e = self.kg_entity_embed(pos_t)
+        neg_t_e = self.kg_entity_embed(neg_t)
+
+        # Embedding lookup for relations
+        r_e = self.kg_relation_embed(r)
+
+        # Relation transform weights
+        trans_M = self.trans_W[r]
+
+        # Perform the transformation
+        h_e = torch.matmul(h_e.unsqueeze(1), trans_M).squeeze(1)
+        pos_t_e = torch.matmul(pos_t_e.unsqueeze(1), trans_M).squeeze(1)
+        neg_t_e = torch.matmul(neg_t_e.unsqueeze(1), trans_M).squeeze(1)
+
+        # L2 normalization
+        h_e = F.normalize(h_e, p=2, dim=1)
+        r_e = F.normalize(r_e, p=2, dim=1)
+        pos_t_e = F.normalize(pos_t_e, p=2, dim=1)
+        neg_t_e = F.normalize(neg_t_e, p=2, dim=1)
+
+        return h_e, r_e, pos_t_e, neg_t_e
+
+    def _cf_forward(self, u, pos_i, neg_i):
+        u_e = self.user_embed(u)
+
+        # Embedding lookup for positive and negative items
+        pos_i_e = self.item_embed(pos_i)
+        neg_i_e = self.item_embed(neg_i)
+
+        # Embedding lookup for positive and negative items in KG embeddings
+        pos_i_kg_e = self.kg_entity_embed(pos_i).view(-1, self.emb_dim)
+        neg_i_kg_e = self.kg_entity_embed(neg_i).view(-1, self.emb_dim)
+
+        # Combine item embeddings with their corresponding KG embeddings
+        pos_i_combined = pos_i_e + pos_i_kg_e
+        neg_i_combined = neg_i_e + neg_i_kg_e
+
+        return u_e, pos_i_combined, neg_i_combined
+
+    def _get_cf_inference(self, u, pos_i):
+        u_e = self.user_embed(u)
+        pos_i_e = self.item_embed(pos_i)
+
+        # Embedding lookup for positive and negative items in KG embeddings
+        pos_i_kg_e = self.kg_entity_embed(pos_i).view(-1, self.emb_dim)
+
+        # Combine item embeddings with their corresponding KG embeddings
+        pos_i_combined = pos_i_e + pos_i_kg_e
+
+        return u_e, pos_i_combined
+
+    def train_step(self, batch_data):
+        u_e, pos_i_e, neg_i_e, h_e, r_e, pos_t_e, neg_t_e, batch_predictions = self(batch_data)
+        self.optimizer.zero_grad()
+
+        # Compute loss
+        total_loss, base_loss, kge_loss, reg_loss = self._build_loss(u_e, pos_i_e, neg_i_e, h_e, r_e, pos_t_e, neg_t_e)
+
+        # Backward pass and optimize
+        total_loss.backward()
+        self.optimizer.step()
+        return total_loss, base_loss, kge_loss, reg_loss
+
+    def forward(self, batch_data, mode='train'):
+        if mode == 'train':
+            # Get CF and KG inferences
+            u, pos_i, neg_i = (torch.IntTensor(batch_data['users']).to(self.device),
+                               torch.IntTensor(batch_data['pos_items']).to(self.device),
+                               torch.IntTensor(batch_data['neg_items']).to(self.device))
+            u_e, pos_i_e, neg_i_e = self._cf_forward(u, pos_i, neg_i)
+            h, r, pos_t, neg_t = (torch.IntTensor(batch_data['heads']).to(self.device),
+                                  torch.IntTensor(batch_data['relations']).to(self.device),
+                                  torch.IntTensor(batch_data['pos_tails']).to(self.device),
+                                  torch.IntTensor(batch_data['neg_tails']).to(self.device))
+            h_e, r_e, pos_t_e, neg_t_e = self._get_kg_inference(h, r, pos_t, neg_t)
+            batch_predictions = torch.matmul(u_e, pos_i_e.t())
+
+            return u_e, pos_i_e, neg_i_e, h_e, r_e, pos_t_e, neg_t_e, batch_predictions
+
+        elif mode == 'eval':
+            embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0)
+
+            # Extract user and item indices
+            user_indices = batch_data['h']
+            item_indices = batch_data['pos_t']
+
+            # Compute user and item embeddings
+            user_embeddings = embeddings[user_indices]
+            item_embeddings = embeddings[item_indices]
+
+            # Relation embeddings - assuming a single relation type for all interactions
+            relation_embedding = self.relation_embed.weight[0]  # Assuming index 0 is the interaction relation
+
+            # Option 1: Dot Product Scoring Function (uncomment to use)
+            # Compute scores for each user-item pair
+            batch_predictions = torch.sum((user_embeddings + relation_embedding) * item_embeddings, dim=1)
+
+            # Option 2: Euclidean Distance Scoring Function (uncomment to use)
+            # Compute squared Euclidean distances for each user-item pair
+            # batch_predictions = torch.sum((user_embeddings + relation_embedding - item_embeddings) ** 2, dim=1)
+
+            return batch_predictions
         else:
-            nn.init.xavier_uniform_(self.item_embed.weight)
-
-        nn.init.xavier_uniform_(self.entity_embed.weight)
-        nn.init.xavier_uniform_(self.relation_embed.weight)
-        nn.init.xavier_uniform_(self.trans_M)
+            raise ValueError('Mode %s not supported' % mode)
 
 
-    def calc_kg_loss(self, h, r, pos_t, neg_t):
-        """
-        h:      (kg_batch_size)
-        r:      (kg_batch_size)
-        pos_t:  (kg_batch_size)
-        neg_t:  (kg_batch_size)
-        """
-        r_embed = self.relation_embed(r)                 # (kg_batch_size, relation_dim)
-        W_r = self.trans_M[r]                            # (kg_batch_size, embed_dim, relation_dim)
+    def _build_loss(self, u_e, pos_i_e, neg_i_e, h_e, r_e, pos_t_e, neg_t_e):
+        kg_loss, kg_reg_loss = self._get_kg_loss(h_e, r_e, pos_t_e, neg_t_e)
+        cf_loss, cf_reg_loss = self._get_cf_loss(u_e, pos_i_e, neg_i_e)
 
-        h_embed = self.entity_embed(h)                   # (kg_batch_size, embed_dim)
-        pos_t_embed = self.entity_embed(pos_t)           # (kg_batch_size, embed_dim)
-        neg_t_embed = self.entity_embed(neg_t)           # (kg_batch_size, embed_dim)
+        base_loss = cf_loss
+        kge_loss = kg_loss
+        reg_loss = self.regs[0] * cf_reg_loss + self.regs[1] * kg_reg_loss
+        total_loss = base_loss + kge_loss + reg_loss
 
-        # Equation (2)
-        r_mul_h = torch.bmm(h_embed.unsqueeze(1), W_r).squeeze(1)             # (kg_batch_size, relation_dim)
-        r_mul_pos_t = torch.bmm(pos_t_embed.unsqueeze(1), W_r).squeeze(1)     # (kg_batch_size, relation_dim)
-        r_mul_neg_t = torch.bmm(neg_t_embed.unsqueeze(1), W_r).squeeze(1)     # (kg_batch_size, relation_dim)
+        return total_loss, base_loss, kge_loss, reg_loss
 
-        r_embed = F.normalize(r_embed, p=2, dim=1)
-        r_mul_h = F.normalize(r_mul_h, p=2, dim=1)
-        r_mul_pos_t = F.normalize(r_mul_pos_t, p=2, dim=1)
-        r_mul_neg_t = F.normalize(r_mul_neg_t, p=2, dim=1)
+    def _get_kg_loss(self, h_e, r_e, pos_t_e, neg_t_e):
+        def _get_kg_score(h_e, r_e, t_e):
+            kg_score = torch.sum((h_e + r_e - t_e) ** 2, dim=1, keepdim=True)
+            return kg_score
 
-        # Equation (3)
-        pos_score = torch.sum(torch.pow(r_mul_h + r_embed - r_mul_pos_t, 2), dim=1)     # (kg_batch_size)
-        neg_score = torch.sum(torch.pow(r_mul_h + r_embed - r_mul_neg_t, 2), dim=1)     # (kg_batch_size)
+        pos_kg_score = _get_kg_score(h_e, r_e, pos_t_e)
+        neg_kg_score = _get_kg_score(h_e, r_e, neg_t_e)
 
-        kg_loss = (-1.0) * F.logsigmoid(neg_score - pos_score)
-        kg_loss = torch.mean(kg_loss)
+        maxi = torch.log(torch.sigmoid(neg_kg_score - pos_kg_score))
+        kg_loss = -torch.mean(maxi)
+        kg_reg_loss = torch.sum(h_e ** 2) + torch.sum(r_e ** 2) + \
+                      torch.sum(pos_t_e ** 2) + torch.sum(neg_t_e ** 2)
 
-        l2_loss = _L2_loss_mean(r_mul_h) + _L2_loss_mean(r_embed) + _L2_loss_mean(r_mul_pos_t) + _L2_loss_mean(r_mul_neg_t)
-        loss = kg_loss + self.kg_l2loss_lambda * l2_loss
-        return loss
+        return kg_loss, kg_reg_loss
 
+    def _get_cf_loss(self, u_e, pos_i_e, neg_i_e):
+        def _get_cf_score(u_e, i_e):
+            cf_score = torch.sum(u_e * i_e, dim=1)
+            return cf_score
 
-    def calc_cf_loss(self, user_ids, item_pos_ids, item_neg_ids):
-        """
-        user_ids:       (cf_batch_size)
-        item_pos_ids:   (cf_batch_size)
-        item_neg_ids:   (cf_batch_size)
-        """
-        user_embed = self.user_embed(user_ids)                          # (cf_batch_size, embed_dim)
-        item_pos_embed = self.item_embed(item_pos_ids)                  # (cf_batch_size, embed_dim)
-        item_neg_embed = self.item_embed(item_neg_ids)                  # (cf_batch_size, embed_dim)
+        pos_cf_score = _get_cf_score(u_e, pos_i_e)
+        neg_cf_score = _get_cf_score(u_e, neg_i_e)
 
-        item_pos_kg_embed = self.entity_embed(item_pos_ids)             # (cf_batch_size, embed_dim)
-        item_neg_kg_embed = self.entity_embed(item_neg_ids)             # (cf_batch_size, embed_dim)
+        maxi = torch.log(1e-10 + torch.sigmoid(pos_cf_score - neg_cf_score))
+        cf_loss = -torch.mean(maxi)
+        cf_reg_loss = torch.sum(u_e ** 2) + torch.sum(pos_i_e ** 2) + torch.sum(neg_i_e ** 2)
 
-        # Equation (5)
-        item_pos_cf_embed = item_pos_embed + item_pos_kg_embed          # (cf_batch_size, embed_dim)
-        item_neg_cf_embed = item_neg_embed + item_neg_kg_embed          # (cf_batch_size, embed_dim)
-
-        # Equation (6)
-        pos_score = torch.sum(user_embed * item_pos_cf_embed, dim=1)    # (cf_batch_size)
-        neg_score = torch.sum(user_embed * item_neg_cf_embed, dim=1)    # (cf_batch_size)
-
-        cf_loss = (-1.0) * torch.log(1e-10 + F.sigmoid(pos_score - neg_score))
-        cf_loss = torch.mean(cf_loss)
-
-        l2_loss = _L2_loss_mean(user_embed) + _L2_loss_mean(item_pos_cf_embed) + _L2_loss_mean(item_neg_cf_embed)
-        loss = cf_loss + self.cf_l2loss_lambda * l2_loss
-        return loss
-
-
-    def calc_loss(self, user_ids, item_pos_ids, item_neg_ids, h, r, pos_t, neg_t):
-        """
-        user_ids:       (cf_batch_size)
-        item_pos_ids:   (cf_batch_size)
-        item_neg_ids:   (cf_batch_size)
-
-        h:              (kg_batch_size)
-        r:              (kg_batch_size)
-        pos_t:          (kg_batch_size)
-        neg_t:          (kg_batch_size)
-        """
-        kg_loss = self.calc_kg_loss(h, r, pos_t, neg_t)
-        cf_loss = self.calc_cf_loss(user_ids, item_pos_ids, item_neg_ids)
-        loss = kg_loss + cf_loss
-        return loss
-
-
-    def calc_score(self, user_ids, item_ids):
-        """
-        user_ids:  (n_users)
-        item_ids:  (n_items)
-        """
-        user_embed = self.user_embed(user_ids)                  # (n_users, embed_dim)
-
-        item_embed = self.item_embed(item_ids)                  # (n_items, embed_dim)
-        item_kg_embed = self.entity_embed(item_ids)             # (n_items, embed_dim)
-        item_cf_embed = item_embed + item_kg_embed              # (n_items, embed_dim)
-
-        cf_score = torch.matmul(user_embed, item_cf_embed.transpose(0, 1))      # (n_users, n_items)
-        return cf_score
-
-
-    def forward(self, *input, is_train):
-        if is_train:
-            return self.calc_loss(*input)
-        else:
-            return self.calc_score(*input)
+        return cf_loss, cf_reg_loss
 
