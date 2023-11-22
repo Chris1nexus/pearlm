@@ -2,7 +2,7 @@ from typing import List
 import numpy as np
 
 NDCG = "ndcg"
-MMR = "mmr"
+MRR = "mrr"
 PRECISION = 'precision'
 RECALL = 'recall'
 

@@ -66,7 +66,7 @@ def evaluate_rec_quality(dataset_name: str, topk_items: Dict[int, List[int]], te
                 else:
                     if metric == NDCG:
                         metric_value = ndcg_at_k(hits, k)
-                    if metric == MMR:
+                    if metric == MRR:
                         metric_value = mmr_at_k(hits, k)
                     if metric == PRECISION:
                         metric_value = precision_at_k(hits, k)
