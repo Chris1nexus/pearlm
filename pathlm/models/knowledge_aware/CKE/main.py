@@ -105,7 +105,7 @@ def train(args):
     args.device = device
     #train_cores = multiprocessing.cpu_count()
 
-    dataset_obj = CKELoader(args=args, path=get_model_data_dir(args.dataset, args.model_type))
+    dataset_obj = CKELoader(args=args, path=get_model_data_dir(args.model_type, args.dataset))
     model = initialize_model(args, dataset_obj)
     logging.info(model)
     early_stopping = EarlyStopping(patience=10, verbose=True)

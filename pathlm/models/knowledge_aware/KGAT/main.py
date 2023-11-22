@@ -142,7 +142,7 @@ def train(args):
     args.device = device
     train_cores = multiprocessing.cpu_count()
 
-    dataset_obj = KGATLoader(args=args, path=get_model_data_dir(args.dataset, args.model_type))
+    dataset_obj = KGATLoader(args=args, path=get_model_data_dir(args.model_type, args.dataset))
     cf_data_loader = get_data_loader(dataset_obj, args, mode='cf', n_proc=train_cores)
     #kge_data_loader = get_data_loader(dataset_obj, args, mode='kg')
 
