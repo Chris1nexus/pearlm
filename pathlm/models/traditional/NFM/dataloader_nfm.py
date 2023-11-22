@@ -8,7 +8,7 @@ from pathlm.models.traditional.data_loader_base import DataLoaderBase
 class DataLoaderNFM(DataLoaderBase):
     def __init__(self, args, logging=None):
         super().__init__(args, logging)
-        self.dataset_name = args.data_name
+        self.dataset_name = args.dataset
         self.train_batch_size = args.train_batch_size
         self.valid_batch_size = args.train_batch_size
         self.test_batch_size = args.test_batch_size

@@ -1,7 +1,7 @@
 import argparse
 import os
 
-from pathlm.utils import SEED
+from pathlm.utils import SEED, get_weight_dir, get_weight_ckpt_dir
 
 
 def parse_nfm_args():
@@ -12,7 +12,7 @@ def parse_nfm_args():
     parser.add_argument('--model_type', nargs='?', default='nfm',
                         help='Specify a model type from {fm, nfm}.')
 
-    parser.add_argument('--data_name', nargs='?', default='ml1m',
+    parser.add_argument('--dataset', nargs='?', default='ml1m',
                         help='Choose a dataset from {yelp2018, last-fm, amazon-book}')
     parser.add_argument('--data_dir', nargs='?', default='data/',
                         help='Input data path.')
@@ -37,7 +37,7 @@ def parse_nfm_args():
                         help='Train batch size.')
     parser.add_argument('--test_batch_size', type=int, default=50,
                         help='Test batch size.')
-    parser.add_argument('--test_cores', type=int, default=32,
+    parser.add_argument('--test_cores', type=int, default=12,
                         help='Number of cores when evaluating.')
 
     parser.add_argument('--lr', type=float, default=0.0001,
@@ -51,15 +51,17 @@ def parse_nfm_args():
                         help='Iter interval of printing loss.')
     parser.add_argument('--evaluate_every', type=int, default=10,
                         help='Epoch interval of evaluating CF.')
-
+    parser.add_argument('--save_interval', type=int, default=20,
+                        help='After how many epochs save ckpt')
     parser.add_argument('--Ks', nargs='?', default='[10]',
                         help='Calculate metric@K when evaluating.')
 
     args = parser.parse_args()
-    save_dir = os.path.join('weights', args.data_name, args.model_type, args.model_type + str(args.embed_dim) +
-                            '-'.join([str(i) for i in eval(args.hidden_dim_list)]) + str(args.lr) + str(args.use_pretrain))
-
-    args.save_dir = save_dir
+    args.Ks = eval(args.Ks)
+    log_dir = os.path.join('logs', args.dataset, args.model_type)
+    args.weight_dir = get_weight_dir(args.model_type, args.dataset)
+    args.weight_dir_ckpt = get_weight_ckpt_dir(args.model_type, args.dataset)
+    args.log_dir = log_dir
 
     return args
 
