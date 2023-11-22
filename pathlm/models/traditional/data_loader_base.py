@@ -6,17 +6,18 @@ import collections
 import torch
 import numpy as np
 import pandas as pd
+from pathlm.utils import get_data_dir
 
 
 class DataLoaderBase(object):
 
     def __init__(self, args, logging):
         self.args = args
-        self.data_name = args.data_name
+        self.data_name = args.dataset
         self.use_pretrain = args.use_pretrain
         self.pretrain_embedding_dir = args.pretrain_embedding_dir
 
-        self.data_dir = os.path.join(args.data_dir, args.data_name, 'preprocessed/kgat')
+        self.data_dir = os.path.join(get_data_dir(args.dataset), 'kgat')
         self.train_file = os.path.join(self.data_dir, 'train.txt')
         self.valid_file = os.path.join(self.data_dir, 'valid.txt')
         self.test_file = os.path.join(self.data_dir, 'test.txt')
@@ -115,8 +116,35 @@ class DataLoaderBase(object):
         batch_neg_item = torch.LongTensor(batch_neg_item)
         return batch_user, batch_pos_item, batch_neg_item
 
+    """
+        def load_kg(self, filename):
+        kg_data = pd.read_csv(filename, sep=' ', names=['h', 'r', 't'], engine='python')
+        kg_data = kg_data.drop_duplicates()
+        return kg_data
+        
+        def generate_kg_batch(self, kg_dict, batch_size, highest_neg_idx):
+        exist_heads = kg_dict.keys()
+        if batch_size <= len(exist_heads):
+            batch_head = random.sample(exist_heads, batch_size)
+        else:
+            batch_head = [random.choice(exist_heads) for _ in range(batch_size)]
 
-    def sample_pos_triples_for_h(self, kg_dict, head, n_sample_pos_triples):
+        batch_relation, batch_pos_tail, batch_neg_tail = [], [], []
+        for h in batch_head:
+            relation, pos_tail = self.sample_pos_triples_for_h(kg_dict, h, 1)
+            batch_relation += relation
+            batch_pos_tail += pos_tail
+
+            neg_tail = self.sample_neg_triples_for_h(kg_dict, h, relation[0], 1, highest_neg_idx)
+            batch_neg_tail += neg_tail
+
+        batch_head = torch.LongTensor(batch_head)
+        batch_relation = torch.LongTensor(batch_relation)
+        batch_pos_tail = torch.LongTensor(batch_pos_tail)
+        batch_neg_tail = torch.LongTensor(batch_neg_tail)
+        return batch_head, batch_relation, batch_pos_tail, batch_neg_tail
+        
+            def sample_pos_triples_for_h(self, kg_dict, head, n_sample_pos_triples):
         pos_triples = kg_dict[head]
         n_pos_triples = len(pos_triples)
 
@@ -147,29 +175,8 @@ class DataLoaderBase(object):
             if (tail, relation) not in pos_triples and tail not in sample_neg_tails:
                 sample_neg_tails.append(tail)
         return sample_neg_tails
+    """
 
-
-    def generate_kg_batch(self, kg_dict, batch_size, highest_neg_idx):
-        exist_heads = kg_dict.keys()
-        if batch_size <= len(exist_heads):
-            batch_head = random.sample(exist_heads, batch_size)
-        else:
-            batch_head = [random.choice(exist_heads) for _ in range(batch_size)]
-
-        batch_relation, batch_pos_tail, batch_neg_tail = [], [], []
-        for h in batch_head:
-            relation, pos_tail = self.sample_pos_triples_for_h(kg_dict, h, 1)
-            batch_relation += relation
-            batch_pos_tail += pos_tail
-
-            neg_tail = self.sample_neg_triples_for_h(kg_dict, h, relation[0], 1, highest_neg_idx)
-            batch_neg_tail += neg_tail
-
-        batch_head = torch.LongTensor(batch_head)
-        batch_relation = torch.LongTensor(batch_relation)
-        batch_pos_tail = torch.LongTensor(batch_pos_tail)
-        batch_neg_tail = torch.LongTensor(batch_neg_tail)
-        return batch_head, batch_relation, batch_pos_tail, batch_neg_tail
 
 
     def load_pretrained_data(self):
