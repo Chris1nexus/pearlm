@@ -19,13 +19,8 @@ from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWord
     PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import tokenize_augmented_kg, get_user_negatives_and_tokens_ids, _initialise_type_masks
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
-<<<<<<< HEAD
 from pathlm.sampling import KGsampler
 from pathlm.utils import get_pid_to_eid, check_dir, SEED
-=======
-from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.utils import check_dir, SEED, get_dataset_id2eid
->>>>>>> c0eb8cda127f602f52b488804377a2e72bafb111
 
 
 class Evaluator:
