@@ -167,7 +167,7 @@ if __name__ == '__main__':
     dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
-    kg_stat = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg_stat = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
     kg, _ = tokenize_augmented_kg(kg_stat, tokenizer)
 
     print("Check faithfulness")

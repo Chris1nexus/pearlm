@@ -18,7 +18,7 @@ from pathlm.models.lm.lm_utils import tokenize_augmented_kg
 from pathlm.models.lm.metrics import get_item_count, get_item_pop, get_item_genre, \
     get_mostpop_topk, REC_QUALITY_METRICS_TOPK, NDCG, MMR, PRECISION, RECALL, SERENDIPITY, DIVERSITY, NOVELTY, novelty_at_k, \
     diversity_at_k, serendipity_at_k, mmr_at_k, ndcg_at_k, precision_at_k, recall_at_k, COVERAGE, coverage, get_result_dir
-from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.sampling import KGsampler
 from pathlm.utils import get_set
 
 
@@ -162,7 +162,7 @@ if __name__ == '__main__':
     dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
-    kg_stat = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg_stat = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
     kg, _ = tokenize_augmented_kg(kg_stat, tokenizer)
 
     print("Check faithfulness")

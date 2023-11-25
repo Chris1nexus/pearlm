@@ -2,7 +2,7 @@
 from pathlm.models.rl.PGPR.pgpr_utils import get_knowledge_derived_relations, MODEL_DATASET_DIR,INTERACTION, DATASET_INFO_DIR,\
         PRODUCT, USER, ENTITY, RELATION
 
-from pathlm.sampling.container.constants import LiteralPath, TypeMapper
+from pathlm.sampling.samplers.constants import LiteralPath, TypeMapper
 
 def tokenize_augmented_kg(kg, tokenizer, use_token_ids=False):
     type_id_to_subtype_mapping = kg.dataset_info.groupwise_global_eid_to_subtype.copy()

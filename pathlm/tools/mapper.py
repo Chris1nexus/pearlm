@@ -13,7 +13,7 @@ from datasets import load_from_disk
 
 from pathlm.utils import *
 from pathlm.models.rl.PGPR.pgpr_utils import *
-from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.sampling import KGsampler
 
 
 
@@ -127,7 +127,7 @@ if __name__ == '__main__':
         CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed'
     }
     dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
-    kg = KGstats(args, dataset_name, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)
 
 
     

@@ -25,8 +25,8 @@ from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.utils import SEED, get_pid_to_eid, get_eid_to_name_map, get_data_dir, get_set, check_dir
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids
 from pathlm.models.lm.metrics import ndcg_at_k, mmr_at_k 
-from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.sampling.container.constants import LiteralPath, TypeMapper
+from pathlm.sampling import KGsampler
+from pathlm.sampling.samplers.constants import LiteralPath, TypeMapper
 
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, \
     _initialise_type_masks, \
@@ -114,7 +114,7 @@ def main(args):
 
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{dataset_name}/preprocessed/mapping/')
-    kg = KGstats(args, dataset_name, dirpath, data_dir=data_dir_mapping)  
+    kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)  
 
     from tokenizers import decoders
     #tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=context_length,

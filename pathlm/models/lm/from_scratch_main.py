@@ -18,7 +18,7 @@ from pathlm.models.lm.plmrec import PLMRec
 from pathlm.models.lm.perlm import PERLM 
 from pathlm.models.lm.lm_utils import _initialise_type_masks, tokenize_augmented_kg
 from pathlm.models.lm.path_dataset import PathDataset
-from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.sampling import KGsampler
 from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.utils import SEED, check_dir
 
@@ -240,6 +240,8 @@ if __name__ == "__main__":
                         help="Validation interval")
     parser.add_argument("--num_epochs", type=int, default=10,
                         help="Number of epochs")     
+    parser.add_argument("--data_dir", type=str, default="./data",
+                        help="default: ./data")        
     #parser.add_argument("--num_training_steps", type=int, default=60000,
     #                    help="Training steps")                                
 
@@ -253,7 +255,7 @@ if __name__ == "__main__":
     run_name=f"{args.exp_name}@{args.dataset}@{args.model}@{args.n_hop}@{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     log_dir = os.path.join(project_name, run_name)
     os.makedirs(log_dir, exist_ok=True)
-    args.data_dir = './data'
+
 
     dataset_dir = os.path.join(args.data_dir, args.dataset)
     args.tokenizer_dir = './tokenizers'
@@ -281,11 +283,11 @@ if __name__ == "__main__":
 
     dirpath = f'{args.data_dir}/{args.dataset}/preprocessed'
     data_dir_mapping = os.path.join(args.data_dir, f'{args.dataset}/preprocessed/mapping/')
-    kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
     sample_size = args.sample_size
     dataset_hop_size = args.n_hop
     TOKENIZED_DATASET_PATH = os.path.join(args.data_dir, f"{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")
-    TOKEN_INDEX_PATH = os.path.join(dirpath, KGstats.TOKEN_INDEX_FILE)
+    TOKEN_INDEX_PATH = os.path.join(dirpath, KGsampler.TOKEN_INDEX_FILE)
     # Try to load the dataset from disk if it has been already tokenized otherwise load it from scratch
     if args.load_data and os.path.exists(TOKENIZED_DATASET_PATH) and os.path.exists(tokenizer_file):
         task = args.task

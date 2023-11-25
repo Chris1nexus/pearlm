@@ -5,8 +5,8 @@ import random
 from transformers import set_seed
 from pathlm.utils import SEED
 from pathlm.models.rl.PGPR.pgpr_utils import * 
-from pathlm.sampling.container.kg_analyzer import KGstats
-from pathlm.sampling.scoring.scorer import TransEScorer
+from pathlm.knowledge_graphs.kg_macros import *
+from pathlm.sampling import KGsampler
 
 def none_or_str(value):
     if value == 'None':
@@ -49,15 +49,12 @@ if __name__ == '__main__':
         LFM1M: f'{ROOT_DATA_DIR}/{LFM1M}/preprocessed',
         CELL: f'{ROOT_DATA_DIR}/{CELL}/preprocessed'
     }
-    dataset_name = args.dataset#'ml1m'
-    #args.dataset = dataset_name
-    dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
-    #print(dirpath)
+    dataset_name = args.dataset
+    dirpath = DATA_DIR[dataset_name]
     data_dir_mapping = os.path.join(ROOT_DATA_DIR, f'{args.dataset}/preprocessed/mapping/')   
-    kg = KGstats(args, args.dataset, dirpath,  save_dir=SAVE_DIR, data_dir=data_dir_mapping)
+    kg = KGsampler(args, args.dataset, dirpath,  save_dir=SAVE_DIR, data_dir=data_dir_mapping)
 
     MAX_HOP = args.max_hop
-    #PROB = 0.01
     N_PATHS = args.max_n_paths
     itemset_type= args.itemset_type
     COLLABORATIVE=args.collaborative
@@ -66,47 +63,11 @@ if __name__ == '__main__':
     print('Closed destination item set: ',itemset_type)
     print('Collaborative filtering: ',args.collaborative)
 
-
-    #LOGDIR = 'paths_random_walk_typed' + f'__hops_{MAX_HOP}__npaths_{N_PATHS}__closed_{itemset_type}__collaborative_{COLLABORATIVE}__start_type_{args.start_type}__end_type_{args.end_type}__typified_{args.with_type}'
     LOGDIR = f'dataset_{args.dataset}__hops_{MAX_HOP}__npaths_{N_PATHS}'
     
-
-    #ml1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set([10]))    
-    #embedding_root_dir='../embedding-weights'
-    embedding_root_dir= os.path.join(ROOT_DIR, 'embedding-weights')
-    scorer=TransEScorer(dataset_name, embedding_root_dir)
     kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
         collaborative=COLLABORATIVE,
         nproc=NPROC,
-        #embedding_root_dir='../embedding-weights',
-        #scorer=scorer,
-        num_beams=10,
         with_type=WITH_TYPE,
         start_ent_type=args.start_type,
         end_ent_type=args.end_type)
-
-
-    '''
-    dataset_name = 'lfm1m'
-    dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
-    args.dataset = dataset_name
-    data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')   
-    lfm1m_kg = KGstats(args, args.dataset, dirpath,  data_dir=data_dir_mapping)
-    scorer=TransEScorer(dataset_name, embedding_root_dir)
-
-    LOGDIR = f'dataset_{args.dataset}__hops_{MAX_HOP}__npaths_{N_PATHS}'
-    lfm1m_kg.random_walk_sampler(max_hop=MAX_HOP, logdir=LOGDIR,ignore_rels=set( ), max_paths=N_PATHS, itemset_type=itemset_type, 
-        collaborative=COLLABORATIVE,
-        nproc=NPROC,
-        #embedding_root_dir='../embedding-weights',
-        #scorer=scorer,
-        num_beams=10,
-        with_type=WITH_TYPE,
-        start_ent_type=args.start_type,
-        end_ent_type=args.end_type        )
-    '''
-    #ml1m_kg.compute_metapath_frequencies()
-    #lfm1m_kg.compute_metapath_frequencies()    
-
- 
-    #lfm1m_kg.path_sampler(max_hop=MAX_HOP, p=PROB, logdir=LOGDIR,ignore_rels=set() ) 

@@ -2,7 +2,7 @@ import os
 import argparse
 from typing import Dict, List
 from pathlm.models.rl.PGPR.pgpr_utils import * 
-from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.sampling import KGsampler
 
 
 
@@ -105,7 +105,7 @@ if __name__ == '__main__':
     #dirpath = DATA_DIR[args.dataset]
     #randwalk_filepath = os.path.join(*dirpath.split('/')[:-1], 'paths_random_walk', 'paths.txt')
 
-    #stats_kg = KGstats(args.dataset, dirpath)
+    #stats_kg = KGsampler(args.dataset, dirpath)
     kg_dict = dict()
     ROOT_DATA_DIR = os.path.join(ROOT_DIR, 'data')
 
@@ -120,7 +120,7 @@ if __name__ == '__main__':
                 data_dir_mapping = os.path.join(ROOT_DIR, f'data/{dataset_name}/preprocessed/mapping/')
                 args.dataset = dataset_name
                 dirpath = DATA_DIR[dataset_name]
-                kg = KGstats(args, dataset_name, dirpath, data_dir=data_dir_mapping)                
+                kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)                
                 kg_dict[dataset_name] = kg
 
             stats_kg = kg_dict[dataset_name]

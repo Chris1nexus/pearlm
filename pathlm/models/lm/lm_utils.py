@@ -6,7 +6,7 @@ from tqdm import tqdm
 from transformers import AutoTokenizer
 
 from pathlm.knowledge_graphs.kg_macros import RELATION, USER
-from pathlm.sampling.container.constants import LiteralPath, TypeMapper
+from pathlm.sampling.samplers.constants import LiteralPath, TypeMapper
 from pathlm.tools.mapper import EmbeddingMapper
 
 

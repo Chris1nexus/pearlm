@@ -124,7 +124,7 @@ class PathCLMTrainer(Trainer):
                 )
                 self.ranker.update_topk(outputs)
                 pbar.update(batch_size)                  
-        print("Average topk length:", sum(len(v) for v in self.ranker.topk.values()) / len(self.ranker.topk))
+        print("Average topk length:", sum(len(v) for v in self.ranker.topk.values()) / max(len(self.ranker.topk), 1)  ) 
         # print("Percentage of sequence that contain invalid item:", count/len(sorted_sequences))
         topks = self.ranker.topk
         self.ranker.reset_topks()
@@ -159,6 +159,7 @@ class PathCLMTrainer(Trainer):
             f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(evaluation['ndcg'])}, mmr: {np.mean(evaluation['mmr'])}")
         '''
         metrics_ = dict()
+       
         _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)
         for k in avg_rec_quality_metrics:
             metrics_[f'eval_{k}'] = np.mean(avg_rec_quality_metrics[k])
@@ -249,7 +250,7 @@ class PathMLMTrainer(Trainer):
         user_positives = get_user_positives(dataset_name)
         sequences = [init_condition_fn(uid) for uid in self.uids]
         dataset = Dataset.from_dict({'uid': self.uids, 'sequence': sequences})
-
+        
         topks = {}
         for uid, sequence in zip(self.uids, dataset['sequence']):
             # Tokenize the sequence and send the tensors to the same device as your model

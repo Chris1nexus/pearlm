@@ -14,7 +14,7 @@ from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWord
     PrefixConstrainedLogitsProcessorWordLevel
 from pathlm.models.lm.lm_utils import get_user_negatives_tokens_ids, tokenize_augmented_kg
 from pathlm.models.lm.ranker import CumulativeSequenceScoreRanker
-from pathlm.sampling.container.kg_analyzer import KGstats
+from pathlm.sampling import KGsampler
 from pathlm.utils import get_pid_to_eid, check_dir, SEED
 
 
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
-    kg = KGstats(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
 
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
     

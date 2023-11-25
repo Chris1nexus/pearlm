@@ -41,28 +41,35 @@ class CumulativeSequenceScoreRanker():
         generate_outputs.sequences_scores = self.sequence_scorer_fnc(generate_outputs.scores, generate_outputs.sequences)
         sorted_indices = generate_outputs.sequences_scores.argsort(descending=True)
         sorted_sequences = generate_outputs.sequences[sorted_indices]
-
+        
+        
         for sequence in sorted_sequences:
+            
             sequence = self.tokenizer.decode(sequence).split(' ')
-            # print(sequence)
+            #print('AAA', sequence)
             uid_token = sequence[1]
             if not uid_token.startswith("U"):
+                #print('Z')
                 continue
             uid = int(sequence[1][1:])
             if len(self.topk[uid]) >= self.K:
+                #print('X')
                 continue
             recommended_token = sequence[-1]
             if not recommended_token.startswith("P"):
+                #print('C')
                 continue
             recommended_item = int(recommended_token[1:])
             if recommended_item not in self.user_negatives[uid]:
+                #print('V')
                 continue
             if recommended_item in self.topk[uid]:
+                #print('B')
                 continue
-
+            #print(uid_token, 'S')
             self.topk[uid].append(recommended_item)
             self.topk_sequences[uid].append(sequence)
-
+        #print('BBBBBB', [len(self.topk[uid]) for uid in self.topk]  )  
     def reset_topks(self):
         del self.topk
         del self.topk_sequences
