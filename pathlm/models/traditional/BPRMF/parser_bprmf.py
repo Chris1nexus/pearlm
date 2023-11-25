@@ -1,7 +1,9 @@
 import argparse
 import os
 
-from pathlm.utils import SEED
+from pathlm.evaluation.eval_utils import get_result_dir
+
+from pathlm.utils import SEED, get_weight_dir, get_weight_ckpt_dir
 
 MODEL = 'bprmf'
 
@@ -10,16 +12,14 @@ def parse_bprmf_args():
     parser.add_argument('--seed', type=int, default=SEED,
                         help='Random seed.')
 
-    parser.add_argument('--data_name', nargs='?', default='amazon-book',
+    parser.add_argument('--dataset', nargs='?', default='amazon-book',
                         help='Choose a dataset from {yelp2018, last-fm, amazon-book}')
-    parser.add_argument('--data_dir', nargs='?', default='data/',
-                        help='Input data path.')
 
     parser.add_argument('--use_pretrain', type=int, default=0,
                         help='0: No pretrain, 1: Pretrain with the learned embeddings, 2: Pretrain with stored model.')
     parser.add_argument('--pretrain_embedding_dir', nargs='?', default=f'weights/ml1m/{MODEL}/',
                         help='Path of learned embeddings.')
-    parser.add_argument('--pretrain_model_path', nargs='?', default='trained_model/model.pth',
+    parser.add_argument('--pretrain_model_path', nargs='?', default=f'weights/ml1m/{MODEL}/{MODEL}.pth',
                         help='Path of stored model.')
 
     parser.add_argument('--embed_dim', type=int, default=64,
@@ -43,16 +43,18 @@ def parse_bprmf_args():
                         help='Iter interval of printing loss.')
     parser.add_argument('--evaluate_every', type=int, default=10,
                         help='Epoch interval of evaluating CF.')
-
+    parser.add_argument('--save_interval', type=int, default=20,
+                        help='After how many epochs save ckpt')
     parser.add_argument('--Ks', nargs='?', default='[10]',
                         help='Calculate metric@K when evaluating.')
 
     args = parser.parse_args()
 
-
-    save_dir = os.path.join('weights', args.data_name, MODEL, MODEL + str(args.embed_dim) +
-                            str(args.lr) + str(args.use_pretrain))
-    args.save_dir = save_dir
-
+    args.Ks = eval(args.Ks)
+    log_dir = os.path.join('logs', args.dataset, MODEL)
+    args.weight_dir = get_weight_dir('bprmf', args.dataset)
+    args.weight_dir_ckpt = get_weight_ckpt_dir('bprmf', args.dataset)
+    args.result_dir = get_result_dir('bprmf', args.dataset)
+    args.log_dir = log_dir
     return args
 

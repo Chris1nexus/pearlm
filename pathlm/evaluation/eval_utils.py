@@ -3,12 +3,15 @@ import pickle
 from collections import defaultdict, Counter
 import random
 from typing import Dict, List
+
+from pathlm.utils import check_dir
+
 from pathlm.datasets.data_utils import get_set, get_user_negatives, get_user_positives
 from tqdm import tqdm
-from pathlm.evaluation.utility_metrics import NDCG, MMR, PRECISION, RECALL
+from pathlm.evaluation.utility_metrics import NDCG, MRR, PRECISION, RECALL
 from pathlm.evaluation.beyond_accuracy_metrics import SERENDIPITY, DIVERSITY, NOVELTY
 
-REC_QUALITY_METRICS_TOPK = [NDCG, MMR, PRECISION, RECALL, SERENDIPITY, DIVERSITY,
+REC_QUALITY_METRICS_TOPK = [NDCG, MRR, PRECISION, RECALL, SERENDIPITY, DIVERSITY,
                             NOVELTY]
 
 def save_topks_items_results(dataset_name: str, model_name: str, topk_items: Dict[int, List[int]], k: int=10):
@@ -17,17 +20,19 @@ def save_topks_items_results(dataset_name: str, model_name: str, topk_items: Dic
     Note that the topk items uses the entity id, not the item id
     """
     result_dir = get_result_dir(dataset_name, model_name)
+    check_dir(result_dir)
     with open(os.path.join(result_dir, f'top{k}_items.pkl'), 'wb') as f:
         pickle.dump(topk_items, f)
 
 def save_topks_paths_results(dataset_name: str, model_name: str, topk_paths: Dict[int, List[int]], k: int=10):
     result_dir = get_result_dir(dataset_name, model_name)
+    check_dir(result_dir)
     with open(os.path.join(result_dir, f'top{k}_paths.pkl'), 'wb') as f:
         pickle.dump(topk_paths, f)
 
-def get_precomputed_topks(dataset_name: str, model_name: str) -> Dict[str, List[str]]:
+def get_precomputed_topks(dataset_name: str, model_name: str, k=10) -> Dict[str, List[str]]:
     result_dir = get_result_dir(dataset_name, model_name)
-    with open(os.path.join(result_dir, 'topk_items.pkl'), 'rb') as f:
+    with open(os.path.join(result_dir, f'top{k}_items.pkl'), 'rb') as f:
         topk_items = pickle.load(f)
     topk_items = {int(k): [int(v) for v in topk_items[k]] for k in topk_items}
     return topk_items

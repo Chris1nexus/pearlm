@@ -26,13 +26,10 @@ class KGEDataLoader(object):
         (u_id, p_id, w_id, b_id, c_id, rp_id, rp_id, rp_id).
         """
         batch = []
-        #print(self.product_relations)
         review_idx = self.review_seq[self.cur_review_i]
         user_idx, product_idx, rating, _ = self.dataset.review.data[review_idx]
         product_knowledge = {pr: getattr(self.dataset, pr).data[product_idx] for pr in
                              self.product_relations}  # DEFINES THE ORDER OF BATCH_IDX
-        #3079 2208
-        #print(self.product_relations)
         while len(batch) < self.batch_size:
             data = [user_idx, product_idx]
             for pr in self.product_relations:

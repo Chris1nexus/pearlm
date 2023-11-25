@@ -6,9 +6,11 @@ Wang Xiang et al. KGAT: Knowledge Graph Attention Network for Recommendation. In
 '''
 from typing import Tuple, Callable, Dict, Union
 
+import numpy as np
+import scipy.sparse as sp
 import torch
 import torch.nn.functional as F
-from torch import nn
+from torch import nn, optim
 
 
 class KGAT(nn.Module):
@@ -19,16 +21,34 @@ class KGAT(nn.Module):
         self._build_weights()
         # Setting the aggregation function based on the alg_type
         method_mapper = {
-            "bi": self._bi_interaction_method,
-            "kgat": self._bi_interaction_method,
-            "gcn": self._gcn_method,
-            "graphsage": self._graphsage_method
+            "bi": self.create_bi_interaction_embed,
+            "kgat": self.create_bi_interaction_embed,
+            #"gcn": self._gcn_method,
+            #"graphsage": self._graphsage_method
         }
 
         if self.alg_type in method_mapper:
-            self.aggregation_fun = lambda: self._aggregator(method_mapper[self.alg_type])
+            self.aggregation_fun = lambda: method_mapper[self.alg_type]
         else:
             raise NotImplementedError
+        # Define the two sets of parameters for each optimizer
+        # Correctly gather parameters for the recommendation optimizer
+        rec_params = []
+        rec_params.extend(self.user_embed.parameters())
+        rec_params.extend(self.entity_embed.parameters())
+        #rec_params.extend(self.gc_layers.parameters())
+        #rec_params.extend(self.bi_layers.parameters())
+        #rec_params.extend(self.mlp_layers.parameters())
+        # Include other parameters related to 'rec' if necessary
+
+        # Correctly gather parameters for the KGE optimizer
+        kge_params = []
+        kge_params.extend(self.relation_embed.parameters())
+        kge_params.append(self.trans_W)
+
+        # Initialize the two optimizers
+        self.recommendation_opt = torch.optim.Adam(self.parameters(), lr=self.lr)
+        self.kge_opt = torch.optim.Adam(self.parameters(), lr=args.lr)
         self._statistics_params()
 
     def _define_layer(self, in_size, out_size, name):
@@ -57,24 +77,40 @@ class KGAT(nn.Module):
         self.relation_embed = torch.nn.Embedding(self.n_relations, self.kge_dim).to(self.device)
         torch.nn.init.xavier_uniform_(self.relation_embed.weight.data)
 
-        self.trans_W = nn.Parameter(
-            torch.nn.init.xavier_uniform_(torch.empty(self.n_relations, self.emb_dim, self.kge_dim))).to(self.device)
+        self.trans_W = nn.Parameter(torch.empty(self.n_relations, self.emb_dim, self.kge_dim))
+        nn.init.xavier_uniform_(self.trans_W)
+        #self.trans_W = nn.Embedding(self.n_relations, self.emb_dim * self.kge_dim)
+        #nn.init.xavier_uniform_(self.trans_W.weight)
+
         self.weight_size_list = [self.emb_dim] + self.weight_size
 
+        self.gc_layers, self.bi_layers, self.mlp_layers = nn.ModuleList(), nn.ModuleList(), nn.ModuleList()
         for k in range(self.n_layers):
-            setattr(self, f'W_gc_{k}', nn.Parameter(
-                torch.nn.init.xavier_uniform_(torch.empty(self.weight_size_list[k], self.weight_size_list[k + 1]).to(self.device))))
-            setattr(self, f'b_gc_{k}',
-                    nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1]).to(self.device))))
-            setattr(self, f'W_bi_{k}', nn.Parameter(
-                torch.nn.init.xavier_uniform_(torch.empty(self.weight_size_list[k], self.weight_size_list[k + 1]).to(self.device))))
-            setattr(self, f'b_bi_{k}',
-                    nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1]).to(self.device))))
-            setattr(self, f'W_mlp_{k}', nn.Parameter(
-                torch.nn.init.xavier_uniform_(torch.empty(2 * self.weight_size_list[k], self.weight_size_list[k + 1]).to(self.device))))
-            setattr(self, f'b_mlp_{k}',
-                    nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1]).to(self.device))))
+            # Graph Convolutional Layers
+            W_gc = nn.Parameter(
+                torch.nn.init.xavier_uniform_(torch.empty(self.weight_size_list[k], self.weight_size_list[k + 1])))
+            b_gc = nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1])))
+            self.gc_layers.append(nn.Linear(self.weight_size_list[k], self.weight_size_list[k + 1]))
+            self.register_parameter(f'W_gc_{k}', W_gc)
+            self.register_parameter(f'b_gc_{k}', b_gc)
+
+            # Bilinear Layers
+            W_bi = nn.Parameter(
+                torch.nn.init.xavier_uniform_(torch.empty(self.weight_size_list[k], self.weight_size_list[k + 1])))
+            b_bi = nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1])))
+            self.bi_layers.append(nn.Linear(self.weight_size_list[k], self.weight_size_list[k + 1]))
+            self.register_parameter(f'W_bi_{k}', W_bi)
+            self.register_parameter(f'b_bi_{k}', b_bi)
+
+            # MLP Layers
+            W_mlp = nn.Parameter(
+                torch.nn.init.xavier_uniform_(torch.empty(2 * self.weight_size_list[k], self.weight_size_list[k + 1])))
+            b_mlp = nn.Parameter(torch.nn.init.xavier_uniform_(torch.empty(1, self.weight_size_list[k + 1])))
+            self.mlp_layers.append(nn.Linear(2 * self.weight_size_list[k], self.weight_size_list[k + 1]))
+            self.register_parameter(f'W_mlp_{k}', W_mlp)
+            self.register_parameter(f'b_mlp_{k}', b_mlp)
         self.A_values = torch.FloatTensor(len(self.all_h_list)).to(self.device)
+
 
     def _initialize_tensor(self, value: float = 0.0) -> torch.Tensor:
         """Initialize a tensor with the given value."""
@@ -128,13 +164,11 @@ class KGAT(nn.Module):
             Result of the forward pass or None.
         """
         if mode == 'rec':
-            return self._forward_phase_I(batch_data['users'], batch_data['pos_items'], batch_data.get('neg_items'))
+            #users, pos_items, neg_items = batch_data
+            return self._forward_phase_I(batch_data['users'], batch_data['pos_items'], batch_data['neg_items'])
         elif mode == 'kge':
-            return self._forward_phase_II(batch_data['heads'], batch_data['relations'], batch_data['pos_tails'],
-                                          batch_data['neg_tails'])
-        elif mode == 'update_att':
-            self.update_attentive_A()
-            return
+            heads, relations, pos_tails, neg_tails = [torch.IntTensor(x).to(self.device) for x in batch_data]
+            return self._forward_phase_II(heads, relations, pos_tails, neg_tails)
         elif mode == 'eval':
             u_e, pos_i_e, _ = self._forward_phase_I(batch_data['users'], batch_data['pos_items'])
             return torch.matmul(u_e, pos_i_e.t())  # Transpose pos_i_e for matrix multiplication
@@ -151,7 +185,7 @@ class KGAT(nn.Module):
         3. graphsage: defined in 'Inductive Representation Learning on Large Graphs', NeurIPS2017.
     """
     def _forward_phase_I(self, users, pos_items, neg_items=None):
-        ua_embeddings, ea_embeddings = self.aggregation_fun()
+        ua_embeddings, ea_embeddings = self.create_bi_interaction_embed()
         u_e, pos_i_e, neg_i_e = ua_embeddings[users], ea_embeddings[pos_items], ea_embeddings[neg_items]
         return u_e, pos_i_e, neg_i_e
     """
@@ -161,53 +195,50 @@ class KGAT(nn.Module):
 
     def _forward_phase_II(self, h, r, pos_t, neg_t):
         h_e, r_e, pos_t_e, neg_t_e = self._get_kg_inference(h, r, pos_t, neg_t)
-        A_kg_score = self._generate_transE_score(h=h, t=pos_t, r=r)
-        self.A_out = self._create_attentive_A_out(A_kg_score, h, pos_t)
+        self.A_kg_score = self._generate_transE_score(h=h, t=pos_t, r=r)
+        self.A_out = self._create_attentive_A_out()
         return h_e, r_e, pos_t_e, neg_t_e
 
-    def _get_kg_inference(self, h: torch.Tensor, r: torch.Tensor, pos_t: torch.Tensor, neg_t: torch.Tensor) -> Tuple[
-        torch.Tensor, ...]:
+    def _get_kg_inference(self, h, r, pos_t, neg_t):
         """
-        Retrieve the knowledge graph embeddings for given entities and relations.
+                Retrieve the knowledge graph embeddings for given entities and relations.
 
-        Given tensors of head entities (h), relations (r), positive tail entities (pos_t),
-        and negative tail entities (neg_t), this function returns their respective embeddings.
+                Given tensors of head entities (h), relations (r), positive tail entities (pos_t),
+                and negative tail entities (neg_t), this function returns their respective embeddings.
 
-        Args:
-            h (torch.Tensor): Tensor of head entities.
-            r (torch.Tensor): Tensor of relations.
-            pos_t (torch.Tensor): Tensor of positive tail entities.
-            neg_t (torch.Tensor): Tensor of negative tail entities.
+                Args:
+                    h (torch.Tensor): Tensor of head entities.
+                    r (torch.Tensor): Tensor of relations.
+                    pos_t (torch.Tensor): Tensor of positive tail entities.
+                    neg_t (torch.Tensor): Tensor of negative tail entities.
 
-        Returns:
-            Tuple[torch.Tensor, ...]: A tuple containing transformed embeddings for head entities,
-                                      relation embeddings, positive tail entities, and negative tail entities.
-        """
-        # Get combined embeddings and add an extra dimension for matrix multiplication
-        embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0).unsqueeze(1)
+                Returns:
+                    Tuple[torch.Tensor, ...]: A tuple containing transformed embeddings for head entities,
+                                              relation embeddings, positive tail entities, and negative tail entities.
+                """
+        embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0)
+        embeddings = embeddings.unsqueeze(1)
 
-        # Retrieve head, positive tail, and negative tail entity embeddings
+        # Embedding lookup for head & tail entities
         h_e = embeddings[h]
         pos_t_e = embeddings[pos_t]
         neg_t_e = embeddings[neg_t]
 
-        # Get relation embeddings and transformation weights
-        self.relation_embed.to(self.device), self.trans_W.to(self.device)
+        # Relation embeddings
         r_e = self.relation_embed(r)
+
+        # Relation transform weights
         trans_M = self.trans_W[r]
 
-        # Transform entity embeddings using the relation transformation weights
-        h_e = torch.bmm(h_e, trans_M).squeeze(1)
-        pos_t_e = torch.bmm(pos_t_e, trans_M).squeeze(1)
-        neg_t_e = torch.bmm(neg_t_e, trans_M).squeeze(1)
+        # Perform matrix multiplication and reshape
+        h_e = torch.matmul(h_e, trans_M).view(-1, self.kge_dim)
+        pos_t_e = torch.matmul(pos_t_e, trans_M).view(-1, self.kge_dim)
+        neg_t_e = torch.matmul(neg_t_e, trans_M).view(-1, self.kge_dim)
+
+        # L2 normalization can be added here if needed
 
         return h_e, r_e, pos_t_e, neg_t_e
 
-    def _regularization_loss(self):
-        regularizer = torch.norm(self.u_e, p=2) + torch.norm(self.pos_i_e, p=2) + torch.norm(self.neg_i_e, p=2)
-        regularizer = regularizer / self.batch_size
-        reg_loss = self.regs[0] * regularizer
-        return reg_loss
 
     """
     Optimize Recommendation (CF) Part via BPR Loss.
@@ -216,18 +247,16 @@ class KGAT(nn.Module):
     def _bpr_loss(self, u_e, pos_i_e, neg_i_e):
         pos_scores = torch.sum(u_e * pos_i_e, dim=1)
         neg_scores = torch.sum(u_e * neg_i_e, dim=1)
+        bpr_loss = F.softplus(-(pos_scores - neg_scores)).mean()
 
-        regularizer = u_e.norm(p=2).pow(2) + pos_i_e.norm(p=2).pow(2) + neg_i_e.norm(p=2).pow(2)
-        regularizer = regularizer / self.batch_size
+        # Regularization
+        reg_loss = (u_e.norm(p=2).pow(2) +
+                    pos_i_e.norm(p=2).pow(2) +
+                    neg_i_e.norm(p=2).pow(2))
+        reg_loss = (reg_loss / self.batch_size) * self.regs[0]
 
-        # Using the softplus as BPR loss to avoid the nan error.
-        base_loss = F.softplus(-(pos_scores - neg_scores)).mean()
-        kge_loss = torch.tensor(0.0).float()
-        reg_loss = self.regs[0] * regularizer
-        recommendation_loss = base_loss + kge_loss + reg_loss
-        # Optimization process.
-        self.recommendation_opt = torch.optim.Adam(self.parameters(), lr=self.lr)
-        return base_loss, reg_loss, recommendation_loss
+        loss = bpr_loss + reg_loss
+        return bpr_loss, reg_loss, loss
 
     def _kge_loss(self, h_e, r_e, pos_t_e, neg_t_e):
         pos_kg_score = torch.sum((h_e + r_e - pos_t_e).pow(2), dim=1, keepdim=True)
@@ -239,65 +268,34 @@ class KGAT(nn.Module):
         kg_reg_loss = kg_reg_loss / self.batch_size_kg
         reg_loss = self.regs[1] * kg_reg_loss
         kge_loss = kg_loss + reg_loss
-        # Optimization process.
-        self.kge_opt = torch.optim.Adam(self.parameters(), lr=self.lr)
         return kge_loss, reg_loss
 
-    def _split_A_hat(self, X: torch.sparse.FloatTensor) -> list:
-        """
-        Split a sparse matrix into several smaller submatrices along the rows.
-
-        Args:
-        - X (torch.sparse.FloatTensor): The sparse matrix to split.
-
-        Returns:
-        - A list of submatrices.
-        """
+    def _split_A_hat(self, X):
         A_fold_hat = []
+
         fold_len = (self.n_users + self.n_entities) // self.n_fold
+
         for i_fold in range(self.n_fold):
             start = i_fold * fold_len
-            end = (i_fold + 1) * fold_len if i_fold != self.n_fold - 1 else self.n_users + self.n_entities
+            if i_fold == self.n_fold - 1:
+                end = self.n_users + self.n_entities
+            else:
+                end = (i_fold + 1) * fold_len
 
-            # Create a mask to select rows within the current range
-            mask = (X._indices()[0] >= start) & (X._indices()[0] < end)
-
-            # Extract the non-zero values and their indices from the masked rows
-            values = X._values()[mask]
-            indices = X._indices()[:, mask]
-            indices[0, :] -= start # Adjust row indices to be local to the current submatrix
-
-            # Create a new sparse tensor for the current submatrix
-            A_fold = torch.sparse_coo_tensor(indices, values, size=(end - start, X.size()[1])).to(self.device)
-
-            # Add the new submatrix to the list
-            A_fold_hat.append(A_fold)
-
+            A_fold_hat.append(self._convert_sp_mat_to_sp_tensor(X[start:end]))
         return A_fold_hat
 
-    def _create_attentive_A_out(self, kg_score: torch.Tensor, batch_h_list: torch.Tensor = None,
-                                batch_t_list: torch.Tensor = None) -> torch.sparse.FloatTensor:
-        """
-        Create an attentive adjacency matrix using knowledge graph scores.
+    def _convert_sp_mat_to_sp_tensor(self, X):
+        coo = X.tocoo().astype(np.float32)
+        indices = torch.LongTensor(np.vstack((coo.row, coo.col)))
+        values = torch.FloatTensor(coo.data)
+        return torch.sparse_coo_tensor(indices, values, coo.shape)
 
-        Args:
-        - kg_score (torch.Tensor): Scores from the knowledge graph.
-        - batch_h_list (torch.Tensor, optional): Head entities in batches. Default to None.
-        - batch_t_list (torch.Tensor, optional): Tail entities in batches. Default to None.
+    def _create_attentive_A_out(self):
+        indices = torch.LongTensor(np.vstack([self.all_h_list, self.all_t_list]).transpose()).to(self.device)
+        A = torch.sparse.softmax(torch.sparse_coo_tensor(indices.t(), self.A_values, self.A_in.shape), dim=1)
+        return A
 
-        Returns:
-        - An attentive adjacency matrix in sparse format.
-        """
-        if batch_h_list is None or batch_t_list is None:
-            indices = torch.LongTensor([self.all_h_list, self.all_t_list]).transpose(0, 1).to(self.device)
-        else:
-            indices = torch.stack((batch_h_list, batch_t_list), dim=1).to(self.device)
-        size = (self.n_users + self.n_entities, self.n_users + self.n_entities)
-
-        sparse_tensor = torch.sparse_coo_tensor(indices.t(), kg_score, size).coalesce()
-        # Apply sparse softmax
-        softmax_sparse = torch.sparse.softmax(sparse_tensor, dim=1)
-        return softmax_sparse
 
     def update_attentive_A(self):
         """
@@ -314,80 +312,50 @@ class KGAT(nn.Module):
             start = i_fold * fold_len
             end = len(self.all_h_list) if i_fold == self.n_fold - 1 else (i_fold + 1) * fold_len
 
-            h_batch = torch.tensor(self.all_h_list[start:end], dtype=torch.long).to('cpu')
-            r_batch = torch.tensor(self.all_r_list[start:end], dtype=torch.long).to('cpu')
-            pos_t_batch = torch.tensor(self.all_t_list[start:end], dtype=torch.long).to('cpu')
+            h_batch = torch.tensor(self.all_h_list[start:end], dtype=torch.long).to(self.device)
+            r_batch = torch.tensor(self.all_r_list[start:end], dtype=torch.long).to(self.device)
+            pos_t_batch = torch.tensor(self.all_t_list[start:end], dtype=torch.long).to(self.device)
 
             A_kg_score = self._generate_transE_score(h_batch, pos_t_batch, r_batch)
-            kg_scores.append(A_kg_score)
+            kg_scores.append(A_kg_score.detach().cpu().numpy())
 
-        kg_scores = torch.cat(kg_scores).to(self.device)
+        kg_scores = np.concatenate(kg_scores)
 
-        # We'll get softmaxed sparse tensor
-        softmaxed_A = self._create_attentive_A_out(kg_scores)
-
-        # Extract the values and indices from softmaxed_A
-        rows, cols = softmaxed_A.indices()
-        values = softmaxed_A.values()
-
-        # Construct the updated adjacency matrix on CPU and then transfer to GPU
-        self.A_in = torch.sparse_coo_tensor(torch.stack([rows, cols]), values,
-                                            size=(self.n_users + self.n_entities, self.n_users + self.n_entities)).to(
-            self.device)
+        # Create the attentive adjacency matrix
+        indices = np.vstack([self.all_h_list, self.all_t_list]).transpose()
+        A_in_coo = sp.coo_matrix((kg_scores, (indices[:, 0], indices[:, 1])),
+                                 shape=(self.n_users + self.n_entities, self.n_users + self.n_entities))
+        self.A_in = A_in_coo.tocsr()
 
         if self.alg_type in ['org', 'gcn']:
-            indices = torch.arange(0, self.A_in.shape[0], dtype=torch.long).to(self.device)
-            self.A_in.index_add_(0, torch.stack([indices, indices]),
-                                 torch.ones(self.A_in.shape[0], dtype=torch.float32).to(self.device))
-
-        # Optional: Free up some memory
-        del softmaxed_A, kg_scores, rows, cols, values
-        torch.cuda.empty_cache()
+            # Adding diagonal elements
+            self.A_in.setdiag(np.ones(self.n_users + self.n_entities))
 
     def _generate_transE_score(self, h: torch.Tensor, t: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
-        """
-        Generate a TransE score for knowledge graph embeddings.
+        # Concatenate user and entity embeddings
+        embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0)
+        embeddings = embeddings.unsqueeze(1)
 
-        This function computes the TransE score for the provided head (h), tail (t),
-        and relation (r) tensors. The TransE score is a measure of the relationship
-        strength in the knowledge graph.
+        # Embedding lookup for head and tail entities
+        h_e = embeddings[h]
+        t_e = embeddings[t]
 
-        Args:
-            h (torch.Tensor): Head entities tensor.
-            t (torch.Tensor): Tail entities tensor.
-            r (torch.Tensor): Relations tensor.
+        # Relation embeddings
+        r_e = self.relation_embed(r)
 
-        Returns:
-            torch.Tensor: Computed TransE scores.
-        """
-        assert h.device == t.device == r.device
-        curr_device = h.device
-        # Concatenate user and entity embeddings as in the original code
-        embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0).to(curr_device)
-        relation_embed = self.relation_embed.to(curr_device)
-        trans_W = self.trans_W.to(curr_device)
-        # Ensure h and t are on the same device as embeddings before indexing
-        h_e = embeddings[h].unsqueeze(1)
-        t_e = embeddings[t].unsqueeze(1)
-        r_e = relation_embed(r)
+        # Relation transform weights
+        trans_M = self.trans_W[r]
 
-        # Relation transform weights: batch_size * kge_dim * emb_dim
-        trans_M = trans_W[r]
+        # Perform matrix multiplication and reshape
+        h_e = torch.matmul(h_e, trans_M).view(-1, self.kge_dim)
+        t_e = torch.matmul(t_e, trans_M).view(-1, self.kge_dim)
 
-        # Batch_size * 1 * kge_dim -> batch_size * kge_dim
-        h_e = torch.matmul(h_e, trans_M).squeeze(1)
-        t_e = torch.matmul(t_e, trans_M).squeeze(1)
+        # L2 normalization can be added here if needed
 
-        # L2-normalize (if needed)
-        # h_e = F.normalize(h_e, p=2, dim=1)
-        # r_e = F.normalize(r_e, p=2, dim=1)
-        # t_e = F.normalize(t_e, p=2, dim=1)
-
+        # Calculate TransE score
         kg_score = torch.sum(t_e * torch.tanh(h_e + r_e), dim=1)
 
         return kg_score
-
-
 
     def _statistics_params(self):
         # number of params
@@ -395,25 +363,39 @@ class KGAT(nn.Module):
         if self.verbose > 0:
             print("#params: %d" % total_parameters)
 
-    def _aggregator(self, unique_aggregation_method: Callable) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Common aggregation routine.
-
-        This function follows common initialization and finalization steps and applies
-        the unique aggregation method based on the provided parameter.
-
-        Returns:
-            Tuple[torch.Tensor, torch.Tensor]:
-                ua_embeddings (torch.Tensor): Embeddings for users.
-                ea_embeddings (torch.Tensor): Embeddings for entities.
-        """
+    def create_bi_interaction_embed(self):
+        # Generate a set of adjacency sub-matrix.
         A_fold_hat = self._split_A_hat(self.A_in)
-        embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0)
-        all_embeddings = [embeddings]
+
+        ego_embeddings = torch.cat([self.user_embed.weight, self.entity_embed.weight], dim=0)
+        all_embeddings = [ego_embeddings]
 
         for k in range(self.n_layers):
-            temp_embed = [torch.sparse.mm(A_fold, embeddings) for A_fold in A_fold_hat]
-            embeddings, norm_embeddings = unique_aggregation_method(embeddings, temp_embed, k)
+            temp_embed = [torch.sparse.mm(A_fold.to(self.device), ego_embeddings) for A_fold in A_fold_hat]
+
+            # Sum messages of neighbors.
+            side_embeddings = torch.cat(temp_embed, 0)
+
+            add_embeddings = ego_embeddings + side_embeddings
+
+            # Transformed sum messages of neighbors.
+            W_gc, b_gc = getattr(self, f'W_gc_{k}'), getattr(self, f'b_gc_{k}')
+            sum_embeddings = F.leaky_relu(torch.mm(add_embeddings, W_gc) + b_gc)
+
+            # Bi messages of neighbors.
+            bi_embeddings = ego_embeddings * side_embeddings
+            # Transformed bi messages of neighbors.
+            W_bi, b_bi = getattr(self, f'W_bi_{k}'), getattr(self, f'b_bi_{k}')
+            bi_embeddings = F.leaky_relu(torch.mm(bi_embeddings, W_bi) + b_bi)
+
+            ego_embeddings = bi_embeddings + sum_embeddings
+
+            # Message dropout.
+            ego_embeddings = F.dropout(ego_embeddings, self.mess_dropout[k])
+
+            # Normalize the distribution of embeddings.
+            norm_embeddings = F.normalize(ego_embeddings, p=2, dim=1)
+
             all_embeddings.append(norm_embeddings)
 
         all_embeddings = torch.cat(all_embeddings, 1)
@@ -421,42 +403,6 @@ class KGAT(nn.Module):
 
         return ua_embeddings, ea_embeddings
 
-    def _bi_interaction_method(self, embeddings, temp_embed, k) -> Tuple[torch.Tensor, torch.Tensor]:
-        side_embeddings = torch.cat(temp_embed, 0)
-        add_embeddings = embeddings + side_embeddings
-        W_gc, b_gc = getattr(self, f'W_gc_{k}'), getattr(self, f'b_gc_{k}')
-        sum_embeddings = F.leaky_relu(torch.mm(add_embeddings, W_gc + b_gc))
-        bi_embeddings = embeddings * side_embeddings
-        W_bi, b_bi = getattr(self, f'W_bi_{k}'), getattr(self, f'b_bi_{k}')
-        bi_embeddings = F.leaky_relu(torch.mm(bi_embeddings, W_bi) + b_bi)
-        embeddings = bi_embeddings + sum_embeddings
-        embeddings = F.dropout(embeddings, self.mess_dropout[k])
-        norm_embeddings = F.normalize(embeddings, p=2, dim=1)
-        return embeddings, norm_embeddings
-
-    def _gcn_method(self, embeddings, temp_embed, k) -> Tuple[torch.Tensor, torch.Tensor]:
-        embeddings = torch.cat(temp_embed, 0)
-        W_gc, b_gc = getattr(self, f'W_gc_{k}'), getattr(self, f'b_gc_{k}')
-        embeddings = F.leaky_relu(torch.mm(embeddings, W_gc + b_gc))
-        embeddings = F.dropout(embeddings, self.mess_dropout[k])
-        norm_embeddings = F.normalize(embeddings, p=2, dim=1)
-        return embeddings, norm_embeddings
-
-    def _graphsage_method(self, embeddings, temp_embed, k) -> Tuple[torch.Tensor, torch.Tensor]:
-        embeddings = torch.cat([embeddings, torch.cat(temp_embed, 0)], 1)
-        W_mlp, b_mlp = getattr(self, f'W_mlp_{k}'), getattr(self, f'b_mlp_{k}')
-        embeddings = F.relu(torch.mm(embeddings, W_mlp + b_mlp))
-        embeddings = F.dropout(embeddings, self.mess_dropout[k])
-        norm_embeddings = F.normalize(embeddings, p=2, dim=1)
-        return embeddings, norm_embeddings
-
-    def create_embed(self, method: str) -> Tuple[torch.Tensor, torch.Tensor]:
-        method_mapper = {
-            "bi_interaction": self._bi_interaction_method,
-            "gcn": self._gcn_method,
-            "graphsage": self._graphsage_method
-        }
-        return self._aggregator(method_mapper[method])
 
     def _parse_args(self, data_config, pretrain_data, args):
         # argument settings
@@ -472,7 +418,7 @@ class KGAT(nn.Module):
         self.n_fold = 100
 
         # initialize the attentive matrix A for phase I.
-        self.A_in = data_config['A_in'].to(self.device)
+        self.A_in = data_config['A_in']
 
         self.all_h_list = data_config['all_h_list']
         self.all_r_list = data_config['all_r_list']

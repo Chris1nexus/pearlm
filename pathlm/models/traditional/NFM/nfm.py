@@ -28,7 +28,8 @@ class NFM(nn.Module):
                  user_pre_embed=None, item_pre_embed=None):
 
         super(NFM, self).__init__()
-        self.model_type = args.model_type
+
+        self.name = args.model_type
         self.use_pretrain = args.use_pretrain
 
         self.n_users = n_users
@@ -55,14 +56,14 @@ class NFM(nn.Module):
             self.feature_embed = nn.Parameter(torch.Tensor(self.n_features, self.embed_dim))
             nn.init.xavier_uniform_(self.feature_embed)
 
-        if self.model_type == 'fm':
+        if self.name == 'fm':
             self.h = nn.Linear(self.embed_dim, 1, bias=False)
             with torch.no_grad():
                 self.h.weight.copy_(torch.ones([1, self.embed_dim]))
             for param in self.h.parameters():
                 param.requires_grad = False
 
-        elif self.model_type == 'nfm':
+        elif self.name == 'nfm':
             self.hidden_layers = nn.ModuleList()
             for idx in range(self.n_layers):
                 self.hidden_layers.append(HiddenLayer(self.hidden_dim_list[idx], self.hidden_dim_list[idx + 1], self.mess_dropout[idx]))
@@ -80,7 +81,7 @@ class NFM(nn.Module):
         square_sum_embed = torch.mm(feature_values.pow(2), self.feature_embed.pow(2))    # (batch_size, embed_dim)
         z = 0.5 * (sum_square_embed - square_sum_embed)                                  # (batch_size, embed_dim)
 
-        if self.model_type == 'nfm':
+        if self.name == 'nfm':
             # Equation (5)
             for i, layer in enumerate(self.hidden_layers):
                 z = layer(z)                                # (batch_size, hidden_dim)

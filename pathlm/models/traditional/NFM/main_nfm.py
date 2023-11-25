@@ -7,6 +7,9 @@ from time import time
 import numpy as np
 import pandas as pd
 import torch
+
+from pathlm.models.model_utils import EarlyStopping, save_model, load_model, logging_metrics
+from pathlm.utils import SEED
 from tqdm import tqdm
 import scipy.sparse as sp
 import torch.optim as optim
@@ -17,7 +20,8 @@ from pathlm.evaluation.utility_metrics import RECALL, NDCG, PRECISION
 from pathlm.models.traditional.NFM.nfm import NFM
 from pathlm.models.traditional.NFM.dataloader_nfm import DataLoaderNFM
 from pathlm.models.traditional.NFM.parser_nfm import parse_nfm_args
-from pathlm.models.traditional.traditional_utils import early_stopping, save_model, load_model, compute_topks
+from pathlm.models.traditional.log_helper import create_log_id, logging_config
+from pathlm.models.traditional.traditional_utils import early_stopping, compute_topks
 
 
 def evaluate_batch(model, dataloader, user_ids, Ks):
@@ -45,7 +49,7 @@ def evaluate_batch(model, dataloader, user_ids, Ks):
     return score_matrix, metrics_dict
 
 
-def evaluate(model, dataloader, Ks, num_processes, device):
+def evaluate(model, dataloader, Ks, device, num_processes=4):
     test_batch_size = dataloader.test_batch_size
     train_user_dict = dataloader.train_user_dict
     valid_user_dict = dataloader.valid_user_dict
@@ -92,56 +96,40 @@ def evaluate(model, dataloader, Ks, num_processes, device):
 
 
 def train(args):
-    # seed
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
+    # Set random seeds for reproducibility
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
+    torch.cuda.manual_seed_all(SEED)
 
-    #log_save_id = create_log_id(args.save_dir)
-    #logging_config(folder=args.save_dir, name='log{:d}'.format(log_save_id), no_console=False)
+    # Setup logging
+    log_save_id = create_log_id(args.log_dir)
+    logging_config(folder=args.log_dir, name=f'log{log_save_id}', no_console=False)
     logging.info(args)
 
-    # GPU / CPU
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-    device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
-        else 'cpu')  )
-    # load data
-    data = DataLoaderNFM(args)
-    if args.use_pretrain == 1:
-        user_pre_embed = torch.tensor(data.user_pre_embed)
-        item_pre_embed = torch.tensor(data.item_pre_embed)
-    else:
-        user_pre_embed, item_pre_embed = None, None
+    # Setup device (GPU/CPU)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # construct model & optimizer
-    model = NFM(args, data.n_users, data.n_items, data.n_entities, user_pre_embed, item_pre_embed)
+    # Load data
+    data = DataLoaderNFM(args)
+
+    # Initialize model
+    user_pre_embed = torch.tensor(data.user_pre_embed) if args.use_pretrain == 1 else None
+    item_pre_embed = torch.tensor(data.item_pre_embed) if args.use_pretrain == 1 else None
+    model = NFM(args, data.n_users, data.n_items, data.n_entities, user_pre_embed, item_pre_embed).to(device)
     if args.use_pretrain == 2:
         model = load_model(model, args.pretrain_model_path)
+    logging.info(model)
 
-    model.to(device)
-    #logging.info(model)
-
+    # Setup optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # initialize metrics
-    best_epoch = -1
-    best_recall = 0
+    # Initialize early stopping
+    early_stopper = EarlyStopping(args.stopping_steps, verbose=True)
+    best_ndcg_value = 0.0
+    best_epoch = 0
 
-    Ks = eval(args.Ks)
-    k_min = min(Ks)
-    k_max = max(Ks)
-
-    epoch_list = []
-    metrics_list = {k: {PRECISION: [], RECALL: [], NDCG: []} for k in Ks}
-
-    num_processes = args.test_cores
-    #if num_processes and num_processes > 1:
-    #    evaluate_func = evaluate_mp
-    #else:
-    evaluate_func = evaluate
-
-    # train model
+    # Training loop
     for epoch in range(1, args.n_epoch + 1):
         model.train()
 
@@ -167,48 +155,34 @@ def train(args):
             total_loss += batch_loss.item()
 
             if (iter % args.print_every) == 0:
-                print('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_batch, time() - time2, batch_loss.item(), total_loss / iter))
-                logging.info('CF Training: Epoch {:04d} Iter {:04d} / {:04d} | Time {:.1f}s | Iter Loss {:.4f} | Iter Mean Loss {:.4f}'.format(epoch, iter, n_batch, time() - time2, batch_loss.item(), total_loss / iter))
-        logging.info('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_batch, time() - time1, total_loss / n_batch))
-        print('CF Training: Epoch {:04d} Total Iter {:04d} | Total Time {:.1f}s | Iter Mean Loss {:.4f}'.format(epoch, n_batch, time() - time1, total_loss / n_batch))
+                logging.info(f'CF Training: Epoch {epoch:04d} Iter {iter:04d} / {n_batch:04d} | '
+                             f'Time {time() - time2:.1f}s | Iter Loss {batch_loss.item():.4f} | '
+                             f'Iter Mean Loss {total_loss / iter:.4f}')
 
-        # evaluate cf
-        if (epoch % args.evaluate_every) == 0 or epoch == args.n_epoch:
-            time3 = time()
-            _, metrics_dict = evaluate_func(model, data, Ks, num_processes, device)
-            logging.info('CF Evaluation: Epoch {:04d} | Total Time {:.1f}s | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-                epoch, time() - time3, metrics_dict[k_min][PRECISION], metrics_dict[k_max][PRECISION], metrics_dict[k_min][RECALL], metrics_dict[k_max][RECALL], metrics_dict[k_min][NDCG], metrics_dict[k_max][NDCG]))
+        logging.info(f'CF Training: Epoch {epoch:04d} Total Iter {n_batch:04d} | Total Time {time() - time1:.1f}s | '
+                     f'Iter Mean Loss {total_loss / n_batch:.4f}')
 
-            epoch_list.append(epoch)
-            for k in Ks:
-                for m in [PRECISION, RECALL, NDCG]:
-                    metrics_list[k][m].append(metrics_dict[k][m])
-            best_metric, should_stop = early_stopping(metrics_list[k_min][NDCG], args.stopping_steps)
+        if epoch % args.evaluate_every == 0 or epoch == args.n_epoch:
+            _, metrics_dict = evaluate(model, data, args.Ks, device)
+            is_best = metrics_dict[args.Ks[0]][NDCG] > best_ndcg_value
+            best_ndcg_value = max(metrics_dict[args.Ks[0]][NDCG], best_ndcg_value)
 
-            if should_stop:
-                break
-
-            if metrics_list[k_min][NDCG].index(best_metric) == len(epoch_list) - 1:
-                save_model(model, args.save_dir, epoch, best_epoch)
-                logging.info('Save model on epoch {:04d}!'.format(epoch))
+            if is_best:
+                save_model(model, args.weight_dir, args, epoch, best_epoch)
                 best_epoch = epoch
 
-    # save metrics
-    metrics_df = [epoch_list]
-    metrics_cols = ['epoch_idx']
-    for k in Ks:
-        for m in [PRECISION, RECALL, NDCG]:
-            metrics_df.append(metrics_list[k][m])
-            metrics_cols.append('{}@{}'.format(m, k))
-    metrics_df = pd.DataFrame(metrics_df).transpose()
-    metrics_df.columns = metrics_cols
-    metrics_df.to_csv(args.save_dir + '/metrics.tsv', sep='\t', index=False)
+            early_stopper(metrics_dict[args.Ks[0]][NDCG])
+            if early_stopper.early_stop:
+                logging.info('Early stopping triggered. Stopping training.')
+                break
 
-    # print best metrics
-    best_metrics = metrics_df.loc[metrics_df['epoch_idx'] == best_epoch].iloc[0].to_dict()
-    logging.info('Best CF Evaluation: Epoch {:04d} | Precision [{:.4f}, {:.4f}], Recall [{:.4f}, {:.4f}], NDCG [{:.4f}, {:.4f}]'.format(
-        int(best_metrics['epoch_idx']), best_metrics['precision@{}'.format(k_min)], best_metrics['precision@{}'.format(k_max)], best_metrics['recall@{}'.format(k_min)], best_metrics['recall@{}'.format(k_max)], best_metrics['ndcg@{}'.format(k_min)], best_metrics['ndcg@{}'.format(k_max)]))
+            logging_metrics(epoch, metrics_dict, args.Ks)
 
+        if epoch % args.save_interval == 0:
+            save_model(model, args.weight_dir_ckpt, args, epoch)
+
+    # Final log for best metrics
+    logging.info(f'Best evaluation results at epoch {best_epoch} with NDCG: {best_ndcg_value:.4f}')
 
 def predict(args):
     # GPU / CPU

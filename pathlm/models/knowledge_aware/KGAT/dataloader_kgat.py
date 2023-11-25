@@ -1,15 +1,9 @@
-'''
-Created on Dec 18, 2018
-Tensorflow Implementation of Knowledge Graph Attention Network (KGAT) model in:
-Wang Xiang et al. KGAT: Knowledge Graph Attention Network for Recommendation. In KDD 2019.
-@author: Xiang Wang (xiangwang@u.nus.edu)
-'''
 import os
 import random
 from typing import Tuple, List, DefaultDict, Union, Dict
 
 import numpy as np
-import torch
+import scipy.sparse as sp
 from time import time
 import collections
 
@@ -19,123 +13,77 @@ from pathlm.datasets.kgat_dataset import KGATStyleDataset
 class KGATLoader(KGATStyleDataset):
     def __init__(self, args, path, batch_style='map'):
         super().__init__(args, path, batch_style)
-        self.batch_size_kg = args.batch_size_kg
-        # Generate the sparse adjacency matrices for user-item interaction & relational kg data.
+        #self.batch_size_kg = args.batch_size_kg
         self.adj_list, self.adj_r_list = self._get_relational_adj_list()
-        # Generate the sparse laplacian matrices.
         self.lap_list = self._get_relational_lap_list()
-
-        # Generate the triples dictionary, key is 'head', value is '(tail, relation)'.
         self.all_kg_dict = self._get_all_kg_dict()
         self.exist_heads = list(self.all_kg_dict.keys())
         self.N_exist_heads = len(self.exist_heads)
-
         self.all_h_list, self.all_r_list, self.all_t_list, self.all_v_list = self._get_all_kg_data()
 
-    def _get_relational_adj_list(self) -> Tuple[List[torch.sparse.FloatTensor], List[int]]:
-        """
-        Construct adjacency matrices for ratings and relational triples.
+    def _get_relational_adj_list(self):
+        t1 = time()
+        adj_mat_list = []
+        adj_r_list = []
 
-        Returns:
-            tuple: A tuple containing two lists - adjacency matrices list and relation list.
-        """
-        t1 = time()  # Start recording time
-        adj_mat_list = []  # List to store adjacency matrices
-        adj_r_list = []  # List to store relations
-
-        def _np_mat2sp_adj(np_mat: np.ndarray, row_pre: int, col_pre: int) -> Tuple[
-            torch.sparse.FloatTensor, torch.sparse.FloatTensor]:
-            """
-            Convert a numpy matrix to two PyTorch sparse adjacency tensors.
-
-            Args:
-                np_mat (np.ndarray): Input numpy matrix.
-                row_pre (int): Row offset.
-                col_pre (int): Column offset.
-
-            Returns:
-                tuple: Two PyTorch sparse tensors.
-            """
+        def _np_mat2sp_adj(np_mat, row_pre, col_pre):
             n_all = self.n_users + self.n_entities
-
-            # Single-direction conversion
+            # single-direction
             a_rows = np_mat[:, 0] + row_pre
             a_cols = np_mat[:, 1] + col_pre
-            a_vals = torch.ones(len(a_rows))
+            a_vals = [1.] * len(a_rows)
 
             b_rows = a_cols
             b_cols = a_rows
-            b_vals = torch.ones(len(b_rows))
+            b_vals = [1.] * len(b_rows)
 
-            # Construct PyTorch sparse tensors
-            indices_a = torch.tensor(np.stack([a_rows, a_cols]), dtype=torch.long)
-            indices_b = torch.tensor(np.stack([b_rows, b_cols]), dtype=torch.long)
-            a_adj = torch.sparse_coo_tensor(indices=indices_a, values=a_vals, size=(n_all, n_all)).to(self.args.device)
-            b_adj = torch.sparse_coo_tensor(indices=indices_b, values=b_vals, size=(n_all, n_all)).to(self.args.device)
+            a_adj = sp.coo_matrix((a_vals, (a_rows, a_cols)), shape=(n_all, n_all))
+            b_adj = sp.coo_matrix((b_vals, (b_rows, b_cols)), shape=(n_all, n_all))
 
             return a_adj, b_adj
 
-        # Convert ratings to adjacency matrices
         R, R_inv = _np_mat2sp_adj(self.train_data, row_pre=0, col_pre=self.n_users)
-        adj_mat_list.extend([R, R_inv])
-        adj_r_list.extend([0, self.n_relations + 1])
+        adj_mat_list.append(R)
+        adj_r_list.append(0)
+
+        adj_mat_list.append(R_inv)
+        adj_r_list.append(self.n_relations + 1)
         print('\tconvert ratings into adj mat done.')
 
-        # Convert relational triples to adjacency matrices
         for r_id in self.relation_dict.keys():
             K, K_inv = _np_mat2sp_adj(np.array(self.relation_dict[r_id]), row_pre=self.n_users, col_pre=self.n_users)
-            adj_mat_list.extend([K, K_inv])
-            adj_r_list.extend([r_id + 1, r_id + 2 + self.n_relations])
+            adj_mat_list.append(K)
+            adj_r_list.append(r_id + 1)
+
+            adj_mat_list.append(K_inv)
+            adj_r_list.append(r_id + 2 + self.n_relations)
         print('\tconvert %d relational triples into adj mat done. @%.4fs' % (len(adj_mat_list), time() - t1))
 
-        self.n_relations = len(adj_r_list)  # Update the number of relations
+        self.n_relations = len(adj_r_list)
+        # print('\tadj relation list is', adj_r_list)
+
         return adj_mat_list, adj_r_list
 
-    def _get_relational_lap_list(self) -> List[torch.sparse_coo_tensor]:
-        """
-        Generate a list of normalized laplacian matrices based on the type of normalization (bi or si).
+    def _get_relational_lap_list(self):
+        def _bi_norm_lap(adj):
+            rowsum = np.array(adj.sum(1))
 
-        Returns:
-            list: List of normalized adjacency matrices.
-        """
+            d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+            d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+            d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
 
-        def _bi_norm_lap(adj: torch.sparse_coo_tensor) -> torch.sparse_coo_tensor:
-            """
-            Compute the bi-normalized laplacian of a sparse matrix.
+            bi_lap = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
+            return bi_lap.tocoo()
 
-            Args:
-                adj (torch.sparse_coo_tensor): Sparse adjacency matrix.
+        def _si_norm_lap(adj):
+            rowsum = np.array(adj.sum(1))
 
-            Returns:
-                torch.sparse_coo_tensor: Bi-normalized laplacian matrix.
-            """
-            rowsum = torch.sparse.sum(adj, dim=1).to_dense()
+            d_inv = np.power(rowsum, -1).flatten()
+            d_inv[np.isinf(d_inv)] = 0.
+            d_mat_inv = sp.diags(d_inv)
 
-            d_inv_sqrt = torch.pow(rowsum, -0.5).flatten()
-            d_inv_sqrt[torch.isinf(d_inv_sqrt)] = 0.
-
-            d_mat_inv_sqrt = torch.diag(d_inv_sqrt).to_sparse()
-            bi_lap = torch.sparse.mm(torch.sparse.mm(adj, d_mat_inv_sqrt).t(), d_mat_inv_sqrt)
-            return bi_lap
-
-        def _si_norm_lap(adj: torch.sparse_coo_tensor) -> torch.sparse_coo_tensor:
-            """
-            Compute the si-normalized laplacian of a sparse matrix.
-
-            Args:
-                adj (torch.sparse_coo_tensor): Sparse adjacency matrix.
-
-            Returns:
-                torch.sparse_coo_tensor: Si-normalized laplacian matrix.
-            """
-            rowsum = torch.sparse.sum(adj, dim=1).to_dense()
-
-            d_inv = torch.pow(rowsum, -1).flatten()
-            d_inv[torch.isinf(d_inv)] = 0.
-
-            d_mat_inv = torch.diag(d_inv).to_sparse()
-            norm_adj = torch.sparse.mm(d_mat_inv, adj)
-            return norm_adj
+            norm_adj = d_mat_inv.dot(adj)
+            return norm_adj.tocoo()
 
         if self.args.adj_type == 'bi':
             lap_list = [_bi_norm_lap(adj) for adj in self.adj_list]
@@ -145,236 +93,183 @@ class KGATLoader(KGATStyleDataset):
             print('\tgenerate si-normalized adjacency matrix.')
         return lap_list
 
-    def _get_all_kg_dict(self) -> DefaultDict[int, List[Tuple[int, int]]]:
-        """
-        Create a dictionary where keys are head entities and values are lists of tail entities and relations.
-
-        Returns:
-            collections.defaultdict: Dictionary of head entities and their associated tail entities and relations.
-        """
+    def _get_all_kg_dict(self):
         all_kg_dict = collections.defaultdict(list)
         for l_id, lap in enumerate(self.lap_list):
-            rows = lap.indices()[0].cpu().numpy()
-            cols = lap.indices()[1].cpu().numpy()
-
-            for i_id in range(len(rows)):
-                head = rows[i_id]
-                tail = cols[i_id]
-                relation = self.adj_r_list[l_id]
-
-                all_kg_dict[head].append((tail, relation))
+            relations = [self.adj_r_list[l_id]] * len(lap.row)
+            all_kg_dict.update({head: all_kg_dict[head] + [(tail, relation)]
+                                for head, tail, relation in zip(lap.row, lap.col, relations)})
         return all_kg_dict
 
-    def _get_all_kg_data(self) -> Tuple[List[int], List[int], List[int], List[float]]:
-        """
-        Organize and sort knowledge graph data based on head entities and tail entities.
+    def _get_all_kg_data(self):
+        def _reorder_list(org_list, order):
+            new_list = np.array(org_list)
+            new_list = new_list[order]
+            return new_list
 
-        Returns:
-            tuple: Lists of head entities, relations, tail entities, and values.
-        """
-        all_h_list, all_t_list, all_r_list, all_v_list = [], [], [], []
+        all_h_list, all_t_list, all_r_list = [], [], []
+        all_v_list = []
 
         for l_id, lap in enumerate(self.lap_list):
-            rows = lap.indices()[0].cpu().numpy()
-            cols = lap.indices()[1].cpu().numpy()
-            data = lap.values().cpu().numpy()
+            all_h_list += list(lap.row)
+            all_t_list += list(lap.col)
+            all_v_list += list(lap.data)
+            all_r_list += [self.adj_r_list[l_id]] * len(lap.row)
 
-            all_h_list.extend(rows)
-            all_t_list.extend(cols)
-            all_v_list.extend(data)
-            all_r_list.extend([self.adj_r_list[l_id]] * len(rows))
+        assert len(all_h_list) == sum([len(lap.data) for lap in self.lap_list])
 
-        assert len(all_h_list) == sum(len(lap.values()) for lap in self.lap_list)
+        print('\treordering indices...')
+        org_h_dict = dict()
 
-        org_h_dict = collections.defaultdict(lambda: [[], [], []])
         for idx, h in enumerate(all_h_list):
+            if h not in org_h_dict.keys():
+                org_h_dict[h] = [[],[],[]]
+
             org_h_dict[h][0].append(all_t_list[idx])
             org_h_dict[h][1].append(all_r_list[idx])
             org_h_dict[h][2].append(all_v_list[idx])
+        print('\treorganize all kg data done.')
 
-        sorted_h_dict = {}
-        for h, (t_list, r_list, v_list) in org_h_dict.items():
-            sorted_indices = np.argsort(t_list)
-            sorted_h_dict[h] = [np.array(t_list)[sorted_indices],
-                                np.array(r_list)[sorted_indices],
-                                np.array(v_list)[sorted_indices]]
+        sorted_h_dict = dict()
+        for h in org_h_dict.keys():
+            org_t_list, org_r_list, org_v_list = org_h_dict[h]
+            sort_t_list = np.array(org_t_list)
+            sort_order = np.argsort(sort_t_list)
 
+            sort_t_list = _reorder_list(org_t_list, sort_order)
+            sort_r_list = _reorder_list(org_r_list, sort_order)
+            sort_v_list = _reorder_list(org_v_list, sort_order)
+
+            sorted_h_dict[h] = [sort_t_list, sort_r_list, sort_v_list]
+        print('\tsort meta-data done.')
+
+        od = collections.OrderedDict(sorted(sorted_h_dict.items()))
         new_h_list, new_t_list, new_r_list, new_v_list = [], [], [], []
-        for h, (sorted_t_list, sorted_r_list, sorted_v_list) in sorted_h_dict.items():
-            new_h_list.extend([h] * len(sorted_t_list))
-            new_t_list.extend(sorted_t_list.tolist())
-            new_r_list.extend(sorted_r_list.tolist())
-            new_v_list.extend(sorted_v_list.tolist())
+
+        for h, vals in od.items():
+            new_h_list += [h] * len(vals[0])
+            new_t_list += list(vals[0])
+            new_r_list += list(vals[1])
+            new_v_list += list(vals[2])
+
 
         assert sum(new_h_list) == sum(all_h_list)
         assert sum(new_t_list) == sum(all_t_list)
         assert sum(new_r_list) == sum(all_r_list)
+        # try:
+        #     assert sum(new_v_list) == sum(all_v_list)
+        # except Exception:
+        #     print(sum(new_v_list), '\n')
+        #     print(sum(all_v_list), '\n')
+        print('\tsort all data done.')
+
 
         return new_h_list, new_r_list, new_t_list, new_v_list
 
+    def set_mode(self, mode):
+        assert mode in ['cf', 'kg'], "Mode must be either 'cf' or 'kg'"
+        self.mode = mode
+
     def __len__(self) -> int:
-        """
-        Determine the number of existing users after the preprocessing.
-        It defines the length of the training dataset, for which a positive and negative are extracted.
+        if self.mode == 'cf':
+            return self.n_train
+        elif self.mode == 'kg':
+            return self.N_exist_heads
+        else:
+            raise ValueError("Invalid mode. Mode must be either 'cf' or 'kg'.")
 
-        Returns:
-            int: Number of existing users.
-        """
-        return self.N_exist_heads
+    def _generate_kge_train_batch(self):
+        exist_heads = self.all_kg_dict.keys()
 
-    def __getitem__(self, idx: int) -> Union[Tuple[int, int, int, int], Dict[str, int]]:
-        """
-        Fetch a data sample based on the given index. This data sample includes
-        head entities, positive relations, positive tails, and negative tails.
+        if self.batch_size_kg <= len(exist_heads):
+            heads = random.sample(exist_heads, self.batch_size_kg)
+        else:
+            heads = [random.choice(exist_heads) for _ in range(self.batch_size_kg)]
 
-        Args:
-            idx (int): Index of the desired data sample.
-
-        Returns:
-            Union[Tuple[int, int, int, int], Dict[str, int]]:
-            Data sample either in tuple format or dictionary format based on `self.batch_style_id`.
-        """
-        def sample_pos_triples_for_h(h: int, num: int) -> Tuple[List[int], List[int]]:
-            """
-            Sample positive triples for the given head entity.
-
-            Args:
-                h (int): Head entity.
-                num (int): Number of triples to sample.
-
-            Returns:
-                tuple: List of relations and list of tails.
-            """
+        def sample_pos_triples_for_h(h, num):
             pos_triples = self.all_kg_dict[h]
-            sampled_triples = random.sample(pos_triples, num)
-            pos_ts, pos_rs = zip(*sampled_triples)
-            return list(pos_rs), list(pos_ts)
+            n_pos_triples = len(pos_triples)
 
-        def sample_neg_triples_for_h(h: int, r: int, num: int) -> List[int]:
-            """
-            Sample negative tails for the given head entity and relation.
+            pos_rs, pos_ts = [], []
+            while True:
+                if len(pos_rs) == num: break
+                pos_id = np.random.randint(low=0, high=n_pos_triples, size=1)[0]
 
-            Args:
-                h (int): Head entity.
-                r (int): Relation for which negative tails are sampled.
-                num (int): Number of tails to sample.
+                t = pos_triples[pos_id][0]
+                r = pos_triples[pos_id][1]
 
-            Returns:
-                list: List of negative tails.
-            """
-            all_possible_tails = set(range(self.n_users + self.n_entities))
-            existing_tails = {t for t, rel in self.all_kg_dict[h] if rel == r}
-            neg_ts = np.random.choice(list(all_possible_tails - existing_tails), num, replace=False)
-            return list(neg_ts)
+                if r not in pos_rs and t not in pos_ts:
+                    pos_rs.append(r)
+                    pos_ts.append(t)
+            return pos_rs, pos_ts
 
-        h = self.exist_heads[idx]
-        pos_rs, pos_ts = sample_pos_triples_for_h(h, 1)
-        neg_ts = sample_neg_triples_for_h(h, pos_rs[0], 1)
+        def sample_neg_triples_for_h(h, r, num):
+            neg_ts = []
+            while True:
+                if len(neg_ts) == num: break
 
-        return {
-            'heads': h,
-            'relations': pos_rs[0],
-            'pos_tails': pos_ts[0],
-            'neg_tails': neg_ts[0]
-        }
+                t = np.random.randint(low=0, high=self.n_users + self.n_entities, size=1)[0]
+                if (t, r) not in self.all_kg_dict[h] and t not in neg_ts:
+                    neg_ts.append(t)
+            return neg_ts
 
-    def get_sparsity_split(self):
-        split_file = os.path.join(self.path, 'sparsity.split')
-        split_uids, split_state = [], []
+        pos_r_batch, pos_t_batch, neg_t_batch = [], [], []
 
-        try:
-            with open(split_file, 'r') as f:
-                lines = f.readlines()
+        for h in heads:
+            pos_rs, pos_ts = sample_pos_triples_for_h(h, 1)
+            pos_r_batch += pos_rs
+            pos_t_batch += pos_ts
 
-            for idx, line in enumerate(lines):
-                if idx % 2 == 0:
-                    split_state.append(line.strip())
-                else:
-                    split_uids.append(list(map(int, line.strip().split(' '))))
-            print('Loaded sparsity split.')
+            neg_ts = sample_neg_triples_for_h(h, pos_rs[0], 1)
+            neg_t_batch += neg_ts
 
-        except Exception:
-            split_uids, split_state = self.load_or_create_sparsity_split()
-            with open(split_file, 'w') as f:
-                for state, uids in zip(split_state, split_uids):
-                    f.write(state + '\n')
-                    f.write(' '.join(map(str, uids)) + '\n')
-            print('Created sparsity split.')
-
-        return split_uids, split_state
-
-    def load_or_create_sparsity_split(self):
-        """Load the sparsity split from file or create a new one if it doesn't exist."""
-        split_file = os.path.join(self.path, 'sparsity.split')
-        split_uids, split_states = [], []
-
-        # Try loading from file
-        try:
-            with open(split_file, 'r') as f:
-                lines = f.readlines()
-
-            for idx, line in enumerate(lines):
-                if idx % 2 == 0:
-                    split_states.append(line.strip())
-                else:
-                    split_uids.append(list(map(int, line.strip().split(' '))))
-            print('Loaded sparsity split.')
-
-        # If loading fails, create a new split
-        except Exception:
-            split_uids, split_states = self.generate_sparsity_split()
-            with open(split_file, 'w') as f:
-                for state, uids in zip(split_states, split_uids):
-                    f.write(f"{state}\n{' '.join(map(str, uids))}\n")
-            print('Created sparsity split.')
-
-        return split_uids, split_states
+        return heads, pos_r_batch, pos_t_batch, neg_t_batch
 
 
-    def generate_sparsity_split(self):
-        """Generate sparsity split based on user data."""
-        all_users_to_test = list(self.test_user_dict.keys())
-        user_item_counts = {uid: len(self.train_user_dict[uid]) + len(self.test_user_dict[uid])
-                            for uid in all_users_to_test}
+    def __getitem__(self, idx: int) -> Dict[str, Union[int, List[int]]]:
+        if self.mode == 'cf':
+            u = self.exist_users[idx % self.n_users]
+            if u not in self.exist_users:
+                raise ValueError(f'Invalid user index {idx}')
+            pos_item = self.sample_pos_items_for_u(u, 1)[0]
+            neg_item = self.sample_neg_items_for_u(u, 1)[0]
+            return {'users': u, 'pos_items': pos_item, 'neg_items': neg_item}
+        elif self.mode == 'kg':
+            h = self.exist_heads[idx]
+            pos_rs, pos_ts = self.sample_pos_triples_for_h(h, 1)
+            neg_ts = self.sample_neg_triples_for_h(h, pos_rs[0], 1)
+            return {'heads': h, 'relations': pos_rs[0], 'pos_tails': pos_ts[0], 'neg_tails': neg_ts[0]}
+        else:
+            raise ValueError("Invalid mode. Mode must be either 'cf' or 'kg'.")
 
-        # Group users by number of interactions
-        grouped_users = {}
-        for n_iids, uid in user_item_counts.items():
-            grouped_users.setdefault(n_iids, []).append(uid)
+    def sample_pos_items_for_u(self, u, num):
+        pos_items = self.train_user_dict[u]
+        return np.random.choice(pos_items, num, replace=False).tolist()
 
-        split_uids, split_states, temp_users, total_interactions, fold_count = [], [], [], 0, 4
+    def sample_neg_items_for_u(self, u, num):
+        user_positives = set(self.train_user_dict[u])
+        neg_items = list(self.products.difference(user_positives))
+        neg_items = np.random.choice(neg_items, num, replace=False).tolist()
+        return neg_items
 
-        for n_iids, users in sorted(grouped_users.items(), key=lambda x: x[0]):
-            temp_users.extend(users)
-            total_interactions += n_iids * len(users)
+    def sample_pos_triples_for_h(self, h: int, num: int) -> Tuple[List[int], List[int]]:
+        pos_triples = self.all_kg_dict[h]
+        sampled_triples = random.sample(pos_triples, num)
+        pos_ts, pos_rs = zip(*sampled_triples)
+        return list(pos_rs), list(pos_ts)
 
-            if total_interactions >= 0.25 * (self.n_train + self.n_test) or fold_count == 0:
-                split_uids.append(temp_users)
-                state_info = f"#interactions/user<={n_iids}, #users={len(temp_users)}, #total interactions={total_interactions}"
-                split_states.append(state_info)
-                print(state_info)
-
-                temp_users, total_interactions = [], 0
-                fold_count -= 1
-
-        return split_uids, split_states
-
-    def get_feed_dict_for_training(self, batch_data):
-        """Prepare the training data as a feed dictionary."""
-        if self.batch_style_id != 0:
-            return batch_data
-        feed_dict = {}
-        if isinstance(batch_data, tuple) and len(batch_data) == 3: #For inference
-            feed_dict['users'], feed_dict['pos_items'], feed_dict['neg_items'] = batch_data
-        elif isinstance(batch_data, tuple) and len(batch_data) == 4: #For training
-            feed_dict['heads'], feed_dict['relations'], feed_dict['pos_tails'], feed_dict['neg_tails'] = batch_data
-        return feed_dict
+    def sample_neg_triples_for_h(self, h: int, r: int, num: int) -> List[int]:
+        all_possible_tails = set(range(self.n_users + self.n_entities))
+        existing_tails = {t for t, rel in self.all_kg_dict[h] if rel == r}
+        neg_ts = np.random.choice(list(all_possible_tails - existing_tails), num, replace=False)
+        return list(neg_ts)
 
     def prepare_test_data(self, user_batch, item_batch):
-        """Prepare the test data based on given user and item batches."""
         return {
             'users': user_batch,
             'pos_items': item_batch,
             'mess_dropout': [0.] * len(eval(self.args.layer_size)),
             'node_dropout': [0.] * len(eval(self.args.layer_size)),
         }
+
+
