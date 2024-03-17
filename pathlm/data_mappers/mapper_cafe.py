@@ -24,7 +24,7 @@ class MapperCAFE(MapperBase):
         print("Writing split CAFE...")
         self.write_split_CAFE()
         print("Writing UID and PID mappings...")
-        self.mapping_folder = os.path.join(get_model_data_dir(args.model, args.data), "mappings")
+        self.mapping_folder = os.path.join(get_data_dir(args.data), "mapping")
         check_dir(self.mapping_folder)
         self.write_uid_pid_mappings()
 

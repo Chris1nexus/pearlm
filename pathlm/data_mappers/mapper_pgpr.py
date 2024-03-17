@@ -17,7 +17,7 @@ class MapperPGPR(MapperBase):
         self.map_to_PGPR()
         self.get_splits()
         self.write_split_PGPR()
-        self.mapping_folder = os.path.join(get_model_data_dir(args.model, args.data), "mappings")
+        self.mapping_folder = os.path.join(get_data_dir(args.data), "mapping")
         check_dir(self.mapping_folder)
         self.write_uid_pid_mappings()
 
