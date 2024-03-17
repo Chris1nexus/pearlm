@@ -1,4 +1,8 @@
 import warnings
+
+import torch
+from pathlm.utils import get_weight_dir, get_weight_ckpt_dir
+
 from pathlm.knowledge_graphs.kg_utils import USER
 from pathlm.models.wadb_utils import MetricsLogger
 
@@ -43,7 +47,7 @@ class ActorCritic(nn.Module):
         x = F.dropout(F.elu(out), p=0.5)
 
         actor_logits = self.actor(x)
-        actor_logits[1-act_mask] = float('-inf')
+        actor_logits[~act_mask] = float('-inf')
         act_probs = F.softmax(actor_logits, dim=-1)  # Tensor of [bs, act_dim]
 
         state_values = self.critic(x)  # Tensor of [bs, 1]
@@ -51,7 +55,7 @@ class ActorCritic(nn.Module):
 
     def select_action(self, batch_state, batch_act_mask, device):
         state = torch.FloatTensor(batch_state).to(device)  # Tensor [bs, state_dim]
-        act_mask = torch.ByteTensor(batch_act_mask).to(device)  # Tensor of [bs, act_dim]
+        act_mask = torch.BoolTensor(batch_act_mask).to(device)  # Tensor of [bs, act_dim]
 
         probs, value = self((state, act_mask))  # act_probs: [bs, act_dim], state_value: [bs, 1]
         m = Categorical(probs)
@@ -270,7 +274,7 @@ def train(args):
 
         ### END of epoch ###
         if epoch % 10 == 0:
-            policy_file = '{}/policy_model_epoch_{}.ckpt'.format(args.log_dir, epoch)
+            policy_file = '{}/policy_model_epoch_{}.ckpt'.format(args.get_weight_ckpt_dir, epoch)
             logger.info("Save models to " + policy_file)
             torch.save(model.state_dict(), policy_file)
 
@@ -320,6 +324,8 @@ def main():
   
 
     args.log_dir = os.path.join(TMP_DIR[args.dataset], args.name)
+    args.weight_dir = get_weight_dir("pgpr", args.dataset)
+    args.weight_dir_ckpt = get_weight_ckpt_dir("pgpr", args.dataset)
     if not os.path.isdir(args.log_dir):
         os.makedirs(args.log_dir)
 

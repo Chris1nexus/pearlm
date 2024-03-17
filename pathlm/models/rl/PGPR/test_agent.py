@@ -1,5 +1,8 @@
 import argparse
 from math import log
+
+import torch
+from pathlm.utils import get_weight_ckpt_dir, get_weight_dir
 from tqdm import tqdm
 from functools import reduce
 import warnings
@@ -14,7 +17,8 @@ from pathlm.models.embeddings.kge_utils import load_embed
 from pathlm.models.rl.PGPR.kg_env import BatchKGEnvironment
 from pathlm.models.rl.PGPR.train_agent import ActorCritic
 from pathlm.models.rl.PGPR.pgpr_utils import *
-warnings.filterwarnings("ignore", category=DeprecationWarning)   
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def batch_beam_search(env, model, uids, device, intrain=None, topk=[25, 5, 1]):
@@ -35,7 +39,7 @@ def batch_beam_search(env, model, uids, device, intrain=None, topk=[25, 5, 1]):
         state_tensor = torch.FloatTensor(state_pool).to(device)
         acts_pool = env._batch_get_actions(path_pool, False)  # list of list, size=bs
         actmask_pool = _batch_acts_to_masks(acts_pool)  # numpy of [bs, dim]
-        actmask_tensor = torch.ByteTensor(actmask_pool).to(device)
+        actmask_tensor = torch.BoolTensor(actmask_pool).to(device)
         probs, _ = model((state_tensor, actmask_tensor))  # Tensor of [bs, act_dim]
 
         probs_max, _ = torch.max(probs, 0)
@@ -99,9 +103,9 @@ def predict_paths(policy_file, path_file, args):
     predicts = {'paths': all_paths, 'probs': all_probs}
     pickle.dump(predicts, open(path_file, 'wb'))
 
-def save_output(dataset_name, pred_paths):
 
-    extracted_path_dir = LOG_DATASET_DIR[dataset_name]#extracted_path_dir + "/pgpr"
+def save_output(dataset_name, pred_paths):
+    extracted_path_dir = LOG_DATASET_DIR[dataset_name]  # extracted_path_dir + "/pgpr"
     if not os.path.isdir(extracted_path_dir):
         os.makedirs(extracted_path_dir)
 
@@ -129,6 +133,7 @@ def save_output(dataset_name, pred_paths):
     with open(extracted_path_dir + "/pred_paths.pkl", 'wb') as pred_paths_file:
         pickle.dump(pred_paths, pred_paths_file)
     pred_paths_file.close()
+
 
 def extract_paths(dataset_name, save_paths, path_file, train_labels, valid_labels, test_labels):
     embeds = load_embed(args.dataset, TRANSE)
@@ -164,6 +169,7 @@ def extract_paths(dataset_name, save_paths, path_file, train_labels, valid_label
     if args.save_paths:
         save_output(dataset_name, pred_paths)
     return pred_paths, scores
+
 
 def evaluate_paths(dataset_name, pred_paths, emb_scores, train_labels, valid_labels, test_labels):
     # 2) Pick best path for each user-product pair, also remove pid if it is in train set.
@@ -235,9 +241,9 @@ def get_path_pattern_weigth(path_pattern_name, pred_uv_paths):
 
 
 def test(args):
-    policy_file = args.log_dir + '/policy_model_epoch_{}.ckpt'.format(args.epochs)
-    
-    path_file = args.log_dir + '/policy_paths_epoch{}.pkl'.format(args.epochs)
+    policy_file = args.weight_dir_ckpt + '/policy_model_epoch_{}.ckpt'.format(args.epochs)
+
+    path_file = args.args.weight_dir + '/policy_paths_epoch{}.pkl'.format(args.epochs)
 
     train_labels = load_labels(args.dataset, 'train')
     valid_labels = load_labels(args.dataset, 'valid')
@@ -246,7 +252,8 @@ def test(args):
     if args.run_path:
         predict_paths(policy_file, path_file, args)
     if args.save_paths or args.run_eval:
-        pred_paths, scores = extract_paths(args.dataset, args.save_paths, path_file, train_labels, valid_labels, test_labels)
+        pred_paths, scores = extract_paths(args.dataset, args.save_paths, path_file, train_labels, valid_labels,
+                                           test_labels)
     if args.run_eval:
         evaluate_paths(args.dataset, pred_paths, scores, train_labels, valid_labels, test_labels)
 
@@ -265,7 +272,7 @@ if __name__ == '__main__':
     parser.add_argument('--state_history', type=int, default=1, help='state history length')
     parser.add_argument('--hidden', type=int, nargs='*', default=[512, 256], help='number of samples')
     parser.add_argument('--add_products', type=boolean, default=True, help='Add predicted products up to 10')
-    parser.add_argument('--topk', type=list, nargs='*', default=[25, 5, 1], help='number of samples')
+    parser.add_argument('--topk', type=list, nargs='*', default=[25, 50, 1], help='number of samples')
     parser.add_argument('--run_path', type=boolean, default=False, help='Generate predicted path? (takes long time)')
     parser.add_argument('--run_eval', type=boolean, default=True, help='Run evaluation?')
     parser.add_argument('--save_paths', type=boolean, default=False, help='Save paths')
@@ -275,4 +282,6 @@ if __name__ == '__main__':
     args.device = torch.device('cuda:0') if torch.cuda.is_available() else 'cpu'
 
     args.log_dir = os.path.join(TMP_DIR[args.dataset], args.name)
+    args.weight_dir = get_weight_dir("pgpr", args.dataset)
+    args.weight_dir_ckpt = get_weight_ckpt_dir("pgpr", args.dataset)
     test(args)
