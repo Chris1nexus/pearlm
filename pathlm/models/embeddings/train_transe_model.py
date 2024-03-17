@@ -75,9 +75,7 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
     args.device = torch.device('cuda:0') if torch.cuda.is_available() else (( torch.device('mps') if hasattr(torch.backends,'mps') and torch.backends.mps.is_available()\
         else 'cpu')  )
-    args.device = 'cpu'
-    #print(TMP_DIR[args.dataset])
-    #args.log_dir = os.path.join(TMP_DIR[args.dataset], args.name)
+    #args.device = 'cpu'
     log_dir = get_log_dir(args.dataset, args.name)
     if not os.path.isdir(log_dir):
         os.makedirs(log_dir)
