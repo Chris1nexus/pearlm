@@ -10,6 +10,9 @@ import pickle
 import logging
 import logging.handlers
 import math
+
+from pathlm.datasets.data_utils import get_user_positives
+from pathlm.utils import get_weight_dir, get_weight_ckpt_dir
 from tqdm import tqdm
 import torch
 from torch.nn import functional as F
@@ -260,7 +263,7 @@ class NeuralProgramLayout(object):
 
 
 def create_heuristic_program(metapaths, raw_paths_with_scores, prior_count, sample_size):
-    pcount = prior_count.astype(np.int)
+    pcount = prior_count.astype(np.int32)
     pcount[pcount > 5] = 5
 
     mp_scores = np.ones(len(metapaths)) * -99
@@ -289,13 +292,6 @@ def create_heuristic_program(metapaths, raw_paths_with_scores, prior_count, samp
 
 
 def save_pred_paths(dataset, pred_paths):
-    #if not os.path.isdir("../../results/"):
-    #    os.makedirs("../../results/")
-
-    #extracted_path_dir = f"../../results/{dataset}"
-    #if not os.path.isdir(extracted_path_dir):
-    #    os.makedirs(extracted_path_dir)
-
     extracted_path_dir = LOG_DATASET_DIR[dataset]#extracted_path_dir + "/cafe"
     if not os.path.isdir(extracted_path_dir):
         os.makedirs(extracted_path_dir)
@@ -322,46 +318,62 @@ def run_program(args):
 
     symbolic_model = create_symbolic_model(args, kg, train=False)
     program_exe = MetaProgramExecutor(symbolic_model, kg_mask, args)
-
-    pred_labels = {}
+    user_positives = get_user_positives(args.dataset)
+    topks = {}
     pbar = tqdm(total=len(test_labels))
     pred_paths_istances = {}
+    pred_paths_topk = {}
     for uid in test_labels:
         pred_paths_istances[uid] = {}
         program = create_heuristic_program(kg.metapaths, raw_paths[uid], path_counts[uid], args.sample_size)
         program_exe.execute(program, uid, train_valid_labels[uid])
         paths = program_exe.collect_results(program)
-        tmp = [(r[0][-1], reduce(lambda x, y: x * y, r[1])) for r in paths]
-        for r in paths:
-            path = [("self_loop", 'user', r[0][0])]
-            for i in range(len(r[-1])):
-                path.append((r[-1][i], r[2][i], r[0][i + 1]))
-                if i == len(r[-1]) - 1: continue
-            pred_paths_istances[r[0][0]][r[0][-1]] = [(reduce(lambda x, y: x * y, r[1]), np.mean(r[1][-1]), path)]
-        pred_paths_topk = sorted(tmp, key=lambda x: x[1], reverse=True)[:k]
-        pred_labels[uid] = [t[0] for t in pred_paths_topk]
-        pbar.update(1) #TODO CHECK
-    save_pred_paths(args.dataset, pred_paths_istances)
-    save_topks_items_results(dataset_name, MODEL, pred_labels, k)
+        path_scores = []
+        for path_info in paths:
+            user_id = path_info[0][0]
+            item_id = path_info[0][-1]
+            if item_id in user_positives[user_id]:
+                continue
+            path_types = path_info[2]
+            relations = path_info[3]
+
+            # Reconstruct the path
+            reconstructed_path = [("self_loop", 'user', user_id)]
+            reconstructed_path.extend(
+                [(relations[i], path_types[i], path_info[0][i + 1]) for i in range(len(relations))])
+
+            # Calculate aggregated score
+            agg_score = reduce(lambda x, y: x + y, path_info[1])
+            path_instance = (agg_score, np.mean(path_info[1][-1]), reconstructed_path)
+            pred_paths_istances[user_id][item_id] = path_instance
+            path_scores.append((item_id, agg_score, path_instance))
+
+        # Sort paths based on aggregated scores and select top-k
+        sorted_paths = sorted(path_scores, key=lambda x: x[1], reverse=True)[:k]
+        topks[uid] = [t[0] for t in sorted_paths]
+        pred_paths_topk[uid] = [t[2] for t in sorted_paths]
+
+        pbar.update(1)
+    #save_pred_paths(args.dataset, pred_paths_istances)
+    save_topks_items_results(dataset_name, MODEL, topks, k)
     save_topks_paths_results(dataset_name, MODEL, pred_paths_topk, k)
 
-    metrics = evaluate_rec_quality(pred_labels, test_labels, args.topk)
-    print_rec_quality_metrics(metrics)
+    rec_quality_metrics, avg_rec_quality_metrics = evaluate_rec_quality(args.dataset, topks, test_labels, k)
+    print_rec_quality_metrics(avg_rec_quality_metrics)
 
 def main():
     args = parse_args()
+
 
     if args.do_infer:
         infer_paths(args)
 
     if args.do_execute:
         # Repeat 10 times due to randomness.
-        logfile = f'{args.log_dir}/program_exe_heuristic_ss{args.sample_size}.txt'
+        logfile = f'{args.weight_dir}/program_exe_heuristic_ss{args.sample_size}.txt'
         set_logger(logfile)
         logger.info(args)
-        for i in range(1):
-            logger.info(i + 1)
-            run_program(args)
+        run_program(args)
 
 
 if __name__ == '__main__':
