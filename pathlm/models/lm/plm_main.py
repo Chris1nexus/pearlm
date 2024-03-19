@@ -140,7 +140,7 @@ def train(args: argparse.Namespace, tokenizer, tokenized_dataset, kg):
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
-        experiment_name=args.exp_name,
+        experiment_name=args.experiment_model_name,
         logit_processor_type=args.logit_processor_type,
         data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
@@ -207,7 +207,7 @@ if __name__ == "__main__":
                         help="Logging interval of the losses")    
     parser.add_argument("--validation_interval", type=int, default=5000,
                         help="Validation interval")
-    parser.add_argument("--num_epochs", type=int, default=5,
+    parser.add_argument("--num_epochs", type=int, default=2,
                         help="Number of epochs")     
     parser.add_argument("--data_dir", type=str, default="./data",
                         help="default: ./data")

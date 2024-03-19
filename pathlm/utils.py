@@ -71,6 +71,8 @@ def get_rid_to_name_map(dataset_name: str) -> dict:
 def get_data_dir(dataset_name: str) -> str:
     return join('data', dataset_name, 'preprocessed')
 
+def get_root_data_dir(dataset_name: str) -> str:
+    return join('data', dataset_name)
 
 def get_model_data_dir(model_name: str, dataset_name: str) -> str:
     return join(get_data_dir(dataset_name), model_name)

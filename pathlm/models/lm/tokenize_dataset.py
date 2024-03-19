@@ -13,25 +13,9 @@ from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
     DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, LogitsProcessorList,\
     set_seed, GPT2LMHeadModel, GPT2Model, EarlyStoppingCallback
 
-
-from pathlm.models.lm.plmrec import PLMRec
-from pathlm.models.lm.perlm import PERLM 
-from pathlm.models.lm.lm_utils import _initialise_type_masks, tokenize_augmented_kg
 from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.sampling import KGsampler
-from pathlm.tools.mapper import EmbeddingMapper
 from pathlm.utils import SEED, check_dir, get_data_dir, get_root_data_dir
-
-from pathlm.models.lm.trainer import PathCLMTrainer
-
-from datetime import datetime
-import wandb
-
-
-
-
-
-
 
 # Read an example and return the tokenized version
 def tokenize_function(examples: str, context_length: int = 200):

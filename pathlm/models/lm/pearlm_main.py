@@ -1,26 +1,14 @@
 import argparse
 import os
-import pickle
 from datasets import load_from_disk, DatasetDict, Dataset
-from tokenizers import (
-    models,
-    pre_tokenizers,
-    processors,
-    trainers,
-    Tokenizer)
 
 from transformers import AutoModelForCausalLM, TrainingArguments, Trainer,\
     DataCollatorForLanguageModeling, AutoConfig, PreTrainedTokenizerFast, LogitsProcessorList,\
     set_seed, GPT2LMHeadModel, GPT2Model, EarlyStoppingCallback
-
-
-from pathlm.models.lm.plmrec import PLMRec
-from pathlm.models.lm.perlm import PERLM 
+from pathlm.models.lm.perlm import PERLM
 from pathlm.models.lm.lm_utils import _initialise_type_masks, tokenize_augmented_kg
-from pathlm.models.lm.path_dataset import PathDataset
 from pathlm.sampling import KGsampler
-from pathlm.tools.mapper import EmbeddingMapper
-from pathlm.utils import SEED, check_dir, get_root_data_dir, get_data_dir, get_weight_dir
+from pathlm.utils import SEED, check_dir, get_data_dir, get_weight_dir, get_root_data_dir
 
 from pathlm.models.lm.trainer import PathCLMTrainer
 
@@ -123,7 +111,7 @@ def train(args: argparse.Namespace, tokenizer, tokenized_dataset, kg):
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset["train"],
-        experiment_name=args.exp_name,
+        experiment_name=args.experiment_model_name,
         logit_processor_type=args.logit_processor_type,
         data_collator=DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False),
         callbacks=[EarlyStoppingCallback(early_stopping_patience=3)]
@@ -185,7 +173,7 @@ if __name__ == "__main__":
                         help="Logging interval of the losses")    
     parser.add_argument("--validation_interval", type=int, default=5000,
                         help="Validation interval")
-    parser.add_argument("--num_epochs", type=int, default=2,
+    parser.add_argument("--num_epochs", type=int, default=3,
                         help="Number of epochs")     
 
 
