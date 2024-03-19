@@ -14,8 +14,9 @@ BPRMF = 'bprmf'
 NFM = 'nfm'
 FM = 'fm'
 TRANSE = 'transe'
-
-SUPPORTED_MODELS = [PGPR, CAFE, UCPR, KGAT, CKE, CFKG, BPRMF, NFM, FM, TRANSE]
+PLM = 'plm'
+PEARLM = 'pearlm'
+SUPPORTED_MODELS = [PGPR, CAFE, UCPR, KGAT, CKE, CFKG, BPRMF, NFM, FM, TRANSE, PLM, PEARLM]
 
 
 def main():
@@ -50,9 +51,10 @@ def main():
     elif args.model == FM:
         # Kgat mapper holds correct also for fm
         MapperKGAT(args)  
-    elif args.model == TRANSE:
-        #MapperUCPR(args)
-        pass
+    elif args.model == TRANSE or args.model == PLM or args.model == PEARLM:
+        print('The model selected saves in preprocessed/mapping/ directory')
+        args.model = 'mapping'
+        MapperPGPR(args)
 
 
 if __name__ == '__main__':
