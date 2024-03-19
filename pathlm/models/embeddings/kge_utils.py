@@ -21,7 +21,7 @@ def get_log_dir(dataset_name: str, embedding_name: str) -> str:
     return ans
 
 def get_dataset_info_dir(dataset_name: str) -> str:
-    ans = os.path.join(ROOT_DIR, 'data', dataset_name, 'preprocessed/pgpr')
+    ans = os.path.join(ROOT_DIR, 'data', dataset_name, 'preprocessed/mapping')
     if not os.path.isdir(ans):
         os.makedirs(ans)
     return ans
