@@ -12,6 +12,7 @@ if __name__ == '__main__':
     parser.add_argument('--sample_size', default='1000', type=str,
                         help='')
     parser.add_argument('--n_hop', default='3', type=str, help='')
+    parser.add_argument('--k', default='10', type=str, help='')
     parser.add_argument('--decoding_strategy', default='gcd', type=str, help='')
     args = parser.parse_args()
 
@@ -20,7 +21,7 @@ if __name__ == '__main__':
     result_dir =  get_result_dir(args.dataset, args.model)
     test_set = get_set(args.dataset, set_str='test')
 
-    with open(os.path.join(result_dir, 'topk_items.pkl'), 'rb') as f:
+    with open(os.path.join(result_dir, f'top{args.k}_items.pkl'), 'rb') as f:
         topk_items = pickle.load(f)
 
     evaluate_rec_quality_from_results(args.dataset, args.model, test_set)
