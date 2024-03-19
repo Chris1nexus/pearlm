@@ -243,7 +243,7 @@ def get_path_pattern_weigth(path_pattern_name, pred_uv_paths):
 def test(args):
     policy_file = args.weight_dir_ckpt + '/policy_model_epoch_{}.ckpt'.format(args.epochs)
 
-    path_file = args.args.weight_dir + '/policy_paths_epoch{}.pkl'.format(args.epochs)
+    path_file = args.weight_dir + '/policy_paths_epoch{}.pkl'.format(args.epochs)
 
     train_labels = load_labels(args.dataset, 'train')
     valid_labels = load_labels(args.dataset, 'valid')
@@ -273,7 +273,7 @@ if __name__ == '__main__':
     parser.add_argument('--hidden', type=int, nargs='*', default=[512, 256], help='number of samples')
     parser.add_argument('--add_products', type=boolean, default=True, help='Add predicted products up to 10')
     parser.add_argument('--topk', type=list, nargs='*', default=[25, 50, 1], help='number of samples')
-    parser.add_argument('--run_path', type=boolean, default=False, help='Generate predicted path? (takes long time)')
+    parser.add_argument('--run_path', type=boolean, default=True, help='Generate predicted path? (takes long time)')
     parser.add_argument('--run_eval', type=boolean, default=True, help='Run evaluation?')
     parser.add_argument('--save_paths', type=boolean, default=False, help='Save paths')
     args = parser.parse_args()
