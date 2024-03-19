@@ -11,7 +11,7 @@ from transformers import Trainer, LogitsProcessorList, PreTrainedTokenizerFast, 
 import wandb
 
 from pathlm.evaluation.eval_metrics import evaluate_rec_quality
-from pathlm.evaluation.eval_utils import get_user_negatives, get_set
+from pathlm.evaluation.eval_utils import get_user_negatives, get_set, save_topks_items_results, save_topks_paths_results
 from pathlm.evaluation.utility_metrics import ndcg_at_k, mmr_at_k
 from pathlm.models.lm.decoding_constraints import ConstrainedLogitsProcessorWordLevel, PLMLogitsProcessorWordLevel, \
     PrefixConstrainedLogitsProcessorWordLevel
@@ -40,8 +40,6 @@ class PathCLMTrainer(Trainer):
         super().__init__(**kwargs)
 
         self.cmd_args = cmd_args
-        #data_dir = f"data/{dataset_name}"
-        data_dir = os.path.join(self.cmd_args.data_dir, dataset_name)
         model = kwargs['model']
         self.tokenizer = tokenizer
         self.dataset_name = dataset_name
@@ -126,7 +124,9 @@ class PathCLMTrainer(Trainer):
                 pbar.update(batch_size)                  
         print("Average topk length:", sum(len(v) for v in self.ranker.topk.values()) / max(len(self.ranker.topk), 1)  ) 
         # print("Percentage of sequence that contain invalid item:", count/len(sorted_sequences))
-        topks = self.ranker.topk
+        topks, topk_sequences = self.ranker.topk, self.ranker.topk_sequences
+        save_topks_items_results(self.dataset_name, self.experiment_name, topks, self.ranker.K)
+        save_topks_paths_results(self.dataset_name,  self.experiment_name, topk_sequences, self.ranker.K)
         self.ranker.reset_topks()
            
         return topks
@@ -136,28 +136,6 @@ class PathCLMTrainer(Trainer):
         # This heuristic assume that our scratch models use wordlevel and ft models use BPE, not ideal but for now is ok
 
         topks = self.__generate_topks_withWordLevel(model)
-        results_dir = os.path.join(self.cmd_args.output_dir, self.cmd_args.experiment_model_name, 'results')
-        check_dir(results_dir)#f"./results/{self.dataset_name}/{self.experiment_name}")
-        pickle.dump(topks, open(os.path.join(results_dir, 'topks.pkl'), 'wb')) #f"./results/{self.dataset_name}/{self.experiment_name}/topks.pkl", "wb"))
-        '''
-        evaluation = {"ndcg": [], "mmr": [], }
-        for uid, topk in tqdm(topks.items(), desc="Evaluating", colour="green"):
-            hits = []
-            for recommended_item in topk:
-                if recommended_item in self.test_set[uid]:
-                    hits.append(1)
-                else:
-                    hits.append(0)
-            while len(hits) < 10:
-                hits.append(0)
-            ndcg = ndcg_at_k(hits, len(hits))
-            mmr = mmr_at_k(hits, len(hits))
-            evaluation["ndcg"].append(ndcg)
-            evaluation["mmr"].append(mmr)
-
-        print(
-            f"no of users: {len(self.test_set.keys())}, ndcg: {np.mean(evaluation['ndcg'])}, mmr: {np.mean(evaluation['mmr'])}")
-        '''
         metrics_ = dict()
        
         _, avg_rec_quality_metrics = evaluate_rec_quality(self.dataset_name, topks, self.test_set)
