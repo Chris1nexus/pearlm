@@ -6,6 +6,9 @@ import numpy as np
 import gzip
 import torch
 import sys
+
+from pathlm.utils import get_weight_dir, get_weight_ckpt_dir
+
 from pathlm.knowledge_graphs.kg_macros import ML1M, LFM1M, CELL
 
 ROOT_DIR = os.environ['DATA_ROOT'] if 'DATA_ROOT' in os.environ else '.'
@@ -104,15 +107,15 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=64, help='batch size.')
     parser.add_argument('--lr', type=float, default=0.1, help='learning rate.')
     parser.add_argument('--steps_per_checkpoint', type=int, default=100, help='Number of steps for checkpoint.')
-    parser.add_argument('--embed_size', type=int, default=200, help='KG embedding size.')
+    parser.add_argument('--embed_size', type=int, default=100, help='KG embedding size.')
     parser.add_argument('--deep_module', type=boolean, default=True, help='Use deep module or not')
     parser.add_argument('--use_dropout', type=boolean, default=True, help='use dropout or not.')
-    parser.add_argument('--rank_weight', type=float, default=1.0, help='weighting factor for ranking loss.')
+    parser.add_argument('--rank_weight', type=float, default=10, help='weighting factor for ranking loss.')
     parser.add_argument('--topk_candidates', type=int, default=10, help='weighting factor for ranking loss.')
 
     # Hyperparameters for execute neural programs (inference).
     parser.add_argument('--k', type=int, default=10, help='size of recommendation list.')
-    parser.add_argument('--sample_size', type=int, default=500, help='sample size for model.')
+    parser.add_argument('--sample_size', type=int, default=50, help='sample size for model.')
     parser.add_argument('--do_infer', type=boolean, default=True, help='whether to infer paths after training.')
     parser.add_argument('--do_execute', type=boolean, default=True, help='whether to execute neural programs.')
     parser.add_argument('--do_validation', type=bool, default=True, help='Whether to perform validation')
@@ -128,12 +131,13 @@ def parse_args():
 
     # This is model directory.
     args.log_dir = f'{TMP_DIR[args.dataset]}/{args.name}'
-
+    args.weight_dir = get_weight_dir(CAFE, args.dataset)
+    args.weight_dir_ckpt = get_weight_ckpt_dir(CAFE, args.dataset)
     # This is the checkpoint name of the trained neural-symbolic model.
-    args.symbolic_model = f'{args.log_dir}/symbolic_model_epoch{args.epochs}.ckpt'
+    args.symbolic_model = f'{args.weight_dir_ckpt}/symbolic_model_epoch{args.epochs}.ckpt'
 
     # This is the filename of the paths inferred by the trained neural-symbolic model.
-    args.infer_path_data = f'{args.log_dir}/infer_path_data.pkl'
+    args.infer_path_data = f'{args.weight_dir}/infer_path_data.pkl'
 
     # Set GPU device.
     os.environ['CUDA_DEVICE_ORDER'] = 'PCI_BUS_ID'
