@@ -1,10 +1,7 @@
-import os
 import argparse
-import random
-
+from pathlm.models.embeddings.kge_utils import get_dataset_info_dir
 from transformers import set_seed
-from pathlm.utils import SEED
-from pathlm.models.rl.PGPR.pgpr_utils import * 
+from pathlm.utils import SEED, get_data_dir
 from pathlm.knowledge_graphs.kg_macros import *
 from pathlm.sampling import KGsampler
 
@@ -34,24 +31,16 @@ if __name__ == '__main__':
 
     set_seed(SEED)
 
-    ML1M = 'ml1m'
-    LFM1M ='lfm1m'
-    CELL='cellphones'
-
     # root dir is current directory (according to the location from where this script is run)
     # e.g. if pathlm/sampling/main.py then ./ translates to pathlm
     ROOT_DIR = args.root_dir
     ROOT_DATA_DIR = os.path.join(ROOT_DIR, args.data_dirname)
     SAVE_DIR = os.path.join(ROOT_DATA_DIR, 'sampled')
     # Dataset directories.
-    DATA_DIR = {
-        ML1M: f'{ROOT_DATA_DIR}/{ML1M}/preprocessed',
-        LFM1M: f'{ROOT_DATA_DIR}/{LFM1M}/preprocessed',
-        CELL: f'{ROOT_DATA_DIR}/{CELL}/preprocessed'
-    }
+
     dataset_name = args.dataset
-    dirpath = DATA_DIR[dataset_name]
-    data_dir_mapping = os.path.join(ROOT_DATA_DIR, f'{args.dataset}/preprocessed/mapping/')   
+    dirpath = get_data_dir(dataset_name)
+    data_dir_mapping = get_dataset_info_dir(dataset_name)
     kg = KGsampler(args, args.dataset, dirpath,  save_dir=SAVE_DIR, data_dir=data_dir_mapping)
 
     MAX_HOP = args.max_hop

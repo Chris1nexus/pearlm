@@ -1,18 +1,9 @@
-
-
-
 import argparse
-import os
 import pickle
-from collections import defaultdict
-from typing import List, Dict
-import torch
+from pathlm.knowledge_graphs.kg_macros import USER, PRODUCT, ENTITY
 from transformers import PreTrainedTokenizerFast, set_seed,AutoConfig,AutoModelForCausalLM
-import numpy as np
 from datasets import load_from_disk
-
 from pathlm.utils import *
-from pathlm.models.rl.PGPR.pgpr_utils import *
 from pathlm.sampling import KGsampler
 
 
@@ -44,8 +35,8 @@ class EmbeddingMapper:
                 break
         element_id = int(token[i:])
         if element_type == 'U':
-            key = kg_info.groupwise_global_eid_to_cat_eid[USER][element_id]
-            elem_type = kg_info.groupwise_global_eid_to_subtype[USER][element_id]
+            key = element_id # kg_info.groupwise_global_eid_to_cat_eid[USER][element_id]
+            elem_type = 'user' #kg_info.groupwise_global_eid_to_subtype[USER][element_id]
         elif element_type == 'P':
             key = kg_info.groupwise_global_eid_to_cat_eid[PRODUCT][element_id]
             elem_type = kg_info.groupwise_global_eid_to_subtype[PRODUCT][element_id]
@@ -121,12 +112,7 @@ if __name__ == '__main__':
 
     ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
     # Dataset directories.
-    DATA_DIR = {
-        ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed',
-        LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed',
-        CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed'
-    }
-    dirpath = DATA_DIR[dataset_name]#.replace('ripple', 'kgat')
+    dirpath = get_data_dir(dataset_name)
     kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)
 
 
