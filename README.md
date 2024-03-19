@@ -26,6 +26,12 @@ Run:
 pip install . 
 ```
 ### 1. Path Dataset generation
+To create the `preprocessed/mapping` folder needed by the random walk algorithm, run from the top level:
+
+```
+python pathlm/data_mappers/map_dataset.py --data <dataset_name> --model pearlm
+```
+
 To generate all datasets, run from the top level:
 ```sh
 source build_datasets.sh
@@ -43,10 +49,15 @@ Install the repository with ```pip install .```
 Then, proceed according to the chosen experiment to run as described below.
 Each bash script can be customised as desired in order to run alternative experiments
 ##### PERLM
-To train PERLM, run from the top level:
+To bulk train PERLM, run from the top level:
 ```sh
 CUDA_DEVICE_NUM=0
 source run_perlm_experiments.sh $CUDA_DEVICE_NUM
+```
+
+To train a specific PEARLM, run from the top level:
+```
+python pathlm/models/lm/pearlm_main.py --data <dataset_name> --model <base-clm-model> --sample_size <sample_size>
 ```
 ##### PLM-Rec
 To train PLM-Rec, run from the top level:
@@ -54,3 +65,9 @@ To train PLM-Rec, run from the top level:
 CUDA_DEVICE_NUM=0
 source run_plm-rec_experiments.sh $CUDA_DEVICE_NUM
 ```
+
+To train a specific PEARLM, run from the top level:
+```
+python pathlm/models/lm/plm_main.py --data <dataset_name> --model <base-clm-model> --sample_size <sample_size> 
+```
+
