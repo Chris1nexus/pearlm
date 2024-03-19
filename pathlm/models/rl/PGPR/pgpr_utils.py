@@ -14,6 +14,7 @@ import shutil
 ML1M = 'ml1m'
 LFM1M = 'lfm1m'
 CELL = 'cellphones'
+COCO = 'coco'
 
 MODEL = 'pgpr'
 TRANSE='transe'
@@ -24,7 +25,8 @@ ROOT_DIR = os.environ['DATA_ROOT'] if 'DATA_ROOT' in os.environ else '.'
 MODEL_DATASET_DIR = {
     ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed/{MODEL}',
     LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed/{MODEL}',
-    CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed/{MODEL}'
+    CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed/{MODEL}',
+    COCO: f'{ROOT_DIR}/data/{COCO}/preprocessed/{MODEL}',
 }
 
 # Dataset directories.
@@ -46,6 +48,7 @@ LOG_DATASET_DIR = {
     ML1M: f'{LOG_DIR}/{ML1M}/{MODEL}',
     LFM1M: f'{LOG_DIR}/{LFM1M}/{MODEL}',
     CELL: f'{LOG_DIR}/{CELL}/{MODEL}',
+    COCO: f'{LOG_DIR}/{COCO}/{MODEL}',
 }
 
 # for compatibility, CFG_DIR, BEST_CFG_DIR have been modified s,t, they are independent from the dataset
@@ -53,11 +56,13 @@ CFG_DIR = {
     ML1M: f'{LOG_DATASET_DIR[ML1M]}/hparams_cfg',
     LFM1M: f'{LOG_DATASET_DIR[LFM1M]}/hparams_cfg',
     CELL: f'{LOG_DATASET_DIR[CELL]}/hparams_cfg',
+    COCO: f'{LOG_DATASET_DIR[COCO]}/hparams_cfg',
 }
 BEST_CFG_DIR = {
     ML1M: f'{LOG_DATASET_DIR[ML1M]}/best_hparams_cfg',
     LFM1M: f'{LOG_DATASET_DIR[LFM1M]}/best_hparams_cfg',
     CELL: f'{LOG_DATASET_DIR[CELL]}/best_hparams_cfg',
+    COCO: f'{LOG_DATASET_DIR[COCO]}/best_hparams_cfg',
 }
 TEST_METRICS_FILE_NAME = 'test_metrics.json'
 RECOM_METRICS_FILE_NAME = 'recommender_metrics.json'
@@ -100,13 +105,15 @@ TMP_DIR = {
     ML1M: f'{MODEL_DATASET_DIR[ML1M]}/tmp',
     LFM1M: f'{MODEL_DATASET_DIR[LFM1M]}/tmp',
     CELL: f'{MODEL_DATASET_DIR[CELL]}/tmp',
+    COCO: f'{MODEL_DATASET_DIR[COCO]}/tmp',
 }
 
 # Label files.
 LABELS = {
     ML1M: (TMP_DIR[ML1M] + '/train_label.pkl', TMP_DIR[ML1M] + '/valid_label.pkl', TMP_DIR[ML1M] + '/test_label.pkl'),
     LFM1M: (TMP_DIR[LFM1M] + '/train_label.pkl', TMP_DIR[LFM1M] + '/valid_label.pkl', TMP_DIR[LFM1M] + '/test_label.pkl'),
-    CELL: (TMP_DIR[CELL] + '/train_label.pkl', TMP_DIR[CELL] + '/valid_label.pkl', TMP_DIR[CELL] + '/test_label.pkl')
+    CELL: (TMP_DIR[CELL] + '/train_label.pkl', TMP_DIR[CELL] + '/valid_label.pkl', TMP_DIR[CELL] + '/test_label.pkl'),
+    COCO: (TMP_DIR[COCO] + '/train_label.pkl', TMP_DIR[COCO] + '/valid_label.pkl', TMP_DIR[COCO] + '/test_label.pkl'),
 }
 
 def get_logger(logname):
