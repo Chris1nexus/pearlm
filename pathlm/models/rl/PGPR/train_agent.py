@@ -274,7 +274,7 @@ def train(args):
 
         ### END of epoch ###
         if epoch % 10 == 0:
-            policy_file = '{}/policy_model_epoch_{}.ckpt'.format(args.get_weight_ckpt_dir, epoch)
+            policy_file = '{}/policy_model_epoch_{}.ckpt'.format(args.weight_dir_ckpt, epoch)
             logger.info("Save models to " + policy_file)
             torch.save(model.state_dict(), policy_file)
 
