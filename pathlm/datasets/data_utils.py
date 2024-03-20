@@ -65,3 +65,13 @@ def get_eid_to_name(dataset_name: str) -> Dict[str, str]:
             eid, name = row[:2]
             eid2name[eid] = ' '.join(name.split('_'))
     return eid2name
+
+
+def get_rid_to_name(dataset_name: str) -> Dict[str, str]:
+    rid2name = dict()
+    with open(os.path.join(f'data/{dataset_name}/preprocessed/r_map.txt')) as f:
+        reader = csv.reader(f, delimiter='\t')
+        for row in reader:
+            rid, name = row[0], row[2]
+            rid2name[rid] = name
+    return rid2name
