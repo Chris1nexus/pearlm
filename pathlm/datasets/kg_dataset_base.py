@@ -17,8 +17,8 @@ class KARSDataset(object):
     This dataset is used for the following models: {PGPR, UCPR}
     """
 
-    def __init__(self, args, set_name='train', data_dir=None):
-        self.dataset_name = args.dataset
+    def __init__(self, dataset_name, set_name='train', data_dir=None):
+        self.dataset_name = dataset_name
         if data_dir is None:
             self.data_dir = get_dataset_info_dir(self.dataset_name)
         else:

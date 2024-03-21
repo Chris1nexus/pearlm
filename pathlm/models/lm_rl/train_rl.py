@@ -114,7 +114,7 @@ def main(args):
 
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{dataset_name}/preprocessed/mapping/')
-    kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)  
+    kg = KGsampler(dataset_name, data_dir=data_dir_mapping)
 
     from tokenizers import decoders
     #tokenizer = PreTrainedTokenizerFast(tokenizer_file=tokenizer_file , max_len=context_length,

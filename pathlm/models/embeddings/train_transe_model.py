@@ -85,7 +85,7 @@ def main():
     logger.info(args)
 
     set_seed(args.seed, False)
-    dataset = KARSDataset(args) #load_dataset(args.dataset)
+    dataset = KARSDataset(args)  #load_dataset(args.dataset)
     model = train(args, dataset)
     model.extract_embeddings(dataset, args.epochs)
     

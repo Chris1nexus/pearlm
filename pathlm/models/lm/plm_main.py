@@ -205,7 +205,7 @@ if __name__ == "__main__":
                         help="Transformer Embedding size (must match external embedding size, if chosen)")
     parser.add_argument("--logging_interval", type=int, default=100,
                         help="Logging interval of the losses")    
-    parser.add_argument("--validation_interval", type=int, default=5000,
+    parser.add_argument("--validation_interval", type=int, default=15000,
                         help="Validation interval")
     parser.add_argument("--num_epochs", type=int, default=2,
                         help="Number of epochs")     
@@ -250,7 +250,7 @@ if __name__ == "__main__":
 
     dirpath = f'{args.data_dir}/{args.dataset}/preprocessed'
     data_dir_mapping = os.path.join(args.data_dir, f'{args.dataset}/preprocessed/mapping/')
-    kg = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(args.dataset, data_dir=data_dir_mapping)
     sample_size = args.sample_size
     dataset_hop_size = args.n_hop
     TOKENIZED_DATASET_PATH = os.path.join(args.data_dir, f"{dataset_name}/{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")

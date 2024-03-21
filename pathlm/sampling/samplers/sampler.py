@@ -1,6 +1,7 @@
 import multiprocessing as mp
 from collections import defaultdict   
 import numpy as np
+from pathlm.utils import get_data_dir
 from tqdm import tqdm
 import pandas as pd
 import json
@@ -232,13 +233,13 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
 
 class KGsampler:
     TOKEN_INDEX_FILE = 'token_index.txt'
-    def __init__(self, args, dataset_name: str, path: str, save_dir='statistics', data_dir=None):
-        
+    def __init__(self, dataset_name: str, save_dir='statistics', data_dir=None):
+        path = get_data_dir(dataset_name)
         os.makedirs(save_dir, exist_ok=True)
         self.save_dir = os.path.join(save_dir, dataset_name)
         os.makedirs(self.save_dir, exist_ok=True)
 
-        self.dataset_info = KARSDataset(args, data_dir=data_dir)
+        self.dataset_info = KARSDataset(dataset_name, data_dir=data_dir)
 
         self.kg2t = KG_RELATION[dataset_name]
         self.token_index_filepath = os.path.join(path, KGsampler.TOKEN_INDEX_FILE)
@@ -490,10 +491,10 @@ if __name__ == '__main__':
     }
     dataset_name = 'ml1m'
     dirpath = DATA_DIR[dataset_name]
-    ml1m_kg = KGsampler(dataset_name, dirpath)
+    ml1m_kg = KGsampler(dirpath)
     dataset_name = 'lfm1m'
     dirpath = DATA_DIR[dataset_name]
-    lfm1m_kg = KGsampler(dataset_name, dirpath)
+    lfm1m_kg = KGsampler(dirpath)
 
 
 

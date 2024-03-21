@@ -120,7 +120,7 @@ if __name__ == '__main__':
                 data_dir_mapping = os.path.join(ROOT_DIR, f'data/{dataset_name}/preprocessed/mapping/')
                 args.dataset = dataset_name
                 dirpath = DATA_DIR[dataset_name]
-                kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)                
+                kg = KGsampler(dataset_name, data_dir=data_dir_mapping)
                 kg_dict[dataset_name] = kg
 
             stats_kg = kg_dict[dataset_name]

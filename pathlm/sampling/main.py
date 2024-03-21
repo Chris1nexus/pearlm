@@ -41,7 +41,7 @@ if __name__ == '__main__':
     dataset_name = args.dataset
     dirpath = get_data_dir(dataset_name)
     data_dir_mapping = get_dataset_info_dir(dataset_name)
-    kg = KGsampler(args, args.dataset, dirpath,  save_dir=SAVE_DIR, data_dir=data_dir_mapping)
+    kg = KGsampler(args.dataset, save_dir=SAVE_DIR, data_dir=data_dir_mapping)
 
     MAX_HOP = args.max_hop
     N_PATHS = args.max_n_paths

@@ -293,7 +293,7 @@ if __name__ == "__main__":
     dirpath = f'{ROOT_DIR}/data/{args.dataset}/preprocessed'
 
     data_dir_mapping = os.path.join(ROOT_DIR, f'data/{args.dataset}/preprocessed/mapping/')
-    kg = KGsampler(args, args.dataset, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(args.dataset, data_dir=data_dir_mapping)
 
     tokenized_kg, _ = tokenize_augmented_kg(kg, tokenizer, use_token_ids=True)
     

@@ -131,7 +131,7 @@ class MapperCAFE(MapperBase):
         pid2kg_df["local_id"] = "product_" + pid2kg_df.index.astype(str)
         self.ratings_pid2new_id = dict(zip(pid2kg_df.pid.astype(str), pid2kg_df.index.astype(str)))
         pid2kg_df["name"] = pid2kg_df.entity
-        pid2kg_df["old_eid"] = pid2kg_df.entity.map(entity2old_eid)
+        pid2kg_df["old_eid"] = pid2kg_df.entity.astype(str).map(entity2old_eid)
         assert pid2kg_df.old_eid.isnull().sum() == 0
         return pd.concat([self.all_entities_df, pid2kg_df[["local_id", "name", "old_eid"]]], ignore_index=True)
 

@@ -214,7 +214,7 @@ if __name__ == "__main__":
 
     dirpath = get_data_dir(dataset_name)
     data_dir_mapping = os.path.join(dirpath, f'mapping/')
-    kg = KGsampler(args, args.dataset, dirpath)
+    kg = KGsampler(args.dataset)
     sample_size = args.sample_size
     dataset_hop_size = args.n_hop
     TOKENIZED_DATASET_PATH = os.path.join(dataset_root_dir, f"{TOKENIZER_TYPE}/{args.task}_{sample_size}_{dataset_hop_size}_tokenized_dataset.hf")

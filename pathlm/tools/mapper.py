@@ -113,7 +113,7 @@ if __name__ == '__main__':
     ROOT_DIR = os.environ('DATA_ROOT') if 'DATA_ROOT' in os.environ else '.'
     # Dataset directories.
     dirpath = get_data_dir(dataset_name)
-    kg = KGsampler(args, dataset_name, dirpath, data_dir=data_dir_mapping)
+    kg = KGsampler(dataset_name, data_dir=data_dir_mapping)
 
 
     
