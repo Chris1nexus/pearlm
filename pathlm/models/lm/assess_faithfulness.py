@@ -136,18 +136,18 @@ if __name__ == '__main__':
     eid_to_name = get_eid_to_name(args.dataset)
     rid_to_name = get_rid_to_name(args.dataset)
     rid_to_name['-1'] = 'interacted'
-    for uid, paths in topks_paths.items():
-        print(f'Examples of corrupted sequence for user {uid}:')
-        for i, path in enumerate(paths):
-            if i > len(corrupted_sequences[uid])-1: break
-            corrupted_seq, corrupted_piece, _ = corrupted_sequences[uid][i]
-            plain_text_path = [corrupted_seq[0]] + [eid_to_name[token[1:]] if j % 2 == 0 else rid_to_name[token[1:]] for j, token in enumerate(corrupted_seq[1:], 1)]
-            plain_text_corrupted = eid_to_name[corrupted_piece[1:]] if not corrupted_piece.startswith('R') else rid_to_name[corrupted_piece[1:]]
-            print("Raw corrupted sequence:")
-            print(f'{corrupted_sequences[uid][i][0]}, '
-                  f'incoherence for {corrupted_sequences[uid][i][1]}')
-            print("Plain text corrupted sequence:")
-            print(f'{plain_text_path}, '
-                  f'incoherence for {plain_text_corrupted}')
-            print("\n")
+    print(f'Examples of corrupted sequence for user {uid}:')
+    paths = topks_paths[random_uid]
+    for i, path in enumerate(paths):
+        if i > len(corrupted_sequences[uid])-1: break
+        corrupted_seq, corrupted_piece, _ = corrupted_sequences[uid][i]
+        plain_text_path = [corrupted_seq[0]] + [eid_to_name[token[1:]] if j % 2 == 0 else rid_to_name[token[1:]] for j, token in enumerate(corrupted_seq[1:], 1)]
+        plain_text_corrupted = eid_to_name[corrupted_piece[1:]] if not corrupted_piece.startswith('R') else rid_to_name[corrupted_piece[1:]]
+        print("Raw corrupted sequence:")
+        print(f'{corrupted_sequences[uid][i][0]}, '
+              f'incoherence for {corrupted_sequences[uid][i][1]}')
+        print("Plain text corrupted sequence:")
+        print(f'{plain_text_path}, '
+              f'incoherence for {plain_text_corrupted}')
+        print("\n")
     exit(-1)
