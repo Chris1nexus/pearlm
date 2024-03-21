@@ -9,7 +9,7 @@ import sys
 
 from pathlm.utils import get_weight_dir, get_weight_ckpt_dir
 
-from pathlm.knowledge_graphs.kg_macros import ML1M, LFM1M, CELL
+from pathlm.knowledge_graphs.kg_macros import ML1M, LFM1M, CELL, COCO
 
 ROOT_DIR = os.environ['DATA_ROOT'] if 'DATA_ROOT' in os.environ else '.'
 
@@ -19,7 +19,8 @@ MODEL = CAFE
 DATA_DIR = {
     ML1M: f'{ROOT_DIR}/data/{ML1M}/preprocessed/{MODEL}',
     LFM1M: f'{ROOT_DIR}/data/{LFM1M}/preprocessed/{MODEL}',
-    CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed/{MODEL}'
+    CELL: f'{ROOT_DIR}/data/{CELL}/preprocessed/{MODEL}',
+    COCO: f'{ROOT_DIR}/data/{COCO}/preprocessed/{MODEL}',
 }
 OPTIM_HPARAMS_METRIC = 'avg_valid_loss'
 VALID_METRICS_FILE_NAME = 'valid_metrics.json'
@@ -32,6 +33,7 @@ LOG_DATASET_DIR = {
     ML1M: f'{LOG_DIR}/{ML1M}/{MODEL}',
     LFM1M: f'{LOG_DIR}/{LFM1M}/{MODEL}',
     CELL: f'{LOG_DIR}/{CELL}/{MODEL}',
+    COCO: f'{LOG_DIR}/{COCO}/{MODEL}',
 }
 
 # for compatibility, CFG_DIR, BEST_CFG_DIR have been modified s,t, they are independent from the dataset
@@ -39,11 +41,13 @@ CFG_DIR = {
     ML1M: f'{LOG_DATASET_DIR[ML1M]}/hparams_cfg',
     LFM1M: f'{LOG_DATASET_DIR[LFM1M]}/hparams_cfg',
     CELL: f'{LOG_DATASET_DIR[CELL]}/hparams_cfg',
+    COCO: f'{LOG_DATASET_DIR[COCO]}/hparams_cfg',
 }
 BEST_CFG_DIR = {
     ML1M: f'{LOG_DATASET_DIR[ML1M]}/best_hparams_cfg',
     LFM1M: f'{LOG_DATASET_DIR[LFM1M]}/best_hparams_cfg',
     CELL: f'{LOG_DATASET_DIR[CELL]}/best_hparams_cfg',
+    COCO: f'{LOG_DATASET_DIR[COCO]}/best_hparams_cfg',
 }
 TEST_METRICS_FILE_NAME = 'test_metrics.json'
 RECOM_METRICS_FILE_NAME = 'recommender_metrics.json'
@@ -51,17 +55,20 @@ RECOM_METRICS_FILE_PATH = {
     ML1M: f'{CFG_DIR[ML1M]}/{RECOM_METRICS_FILE_NAME}',
     LFM1M: f'{CFG_DIR[LFM1M]}/{RECOM_METRICS_FILE_NAME}',
     CELL: f'{CFG_DIR[CELL]}/{RECOM_METRICS_FILE_NAME}',
+    COCO: f'{CFG_DIR[COCO]}/{RECOM_METRICS_FILE_NAME}',
 }
 
 TEST_METRICS_FILE_PATH = {
     ML1M: f'{CFG_DIR[ML1M]}/{TEST_METRICS_FILE_NAME}',
     LFM1M: f'{CFG_DIR[LFM1M]}/{TEST_METRICS_FILE_NAME}',
     CELL: f'{CFG_DIR[CELL]}/{TEST_METRICS_FILE_NAME}',
+    COCO: f'{CFG_DIR[COCO]}/{TEST_METRICS_FILE_NAME}',
 }
 BEST_TEST_METRICS_FILE_PATH = {
     ML1M: f'{BEST_CFG_DIR[ML1M]}/{TEST_METRICS_FILE_NAME}',
     LFM1M: f'{BEST_CFG_DIR[LFM1M]}/{TEST_METRICS_FILE_NAME}',
     CELL: f'{BEST_CFG_DIR[CELL]}/{TEST_METRICS_FILE_NAME}',
+    COCO: f'{BEST_CFG_DIR[COCO]}/{TEST_METRICS_FILE_NAME}',
 }
 
 
@@ -70,11 +77,13 @@ CFG_FILE_PATH = {
     ML1M: f'{CFG_DIR[ML1M]}/{CONFIG_FILE_NAME}',
     LFM1M: f'{CFG_DIR[LFM1M]}/{CONFIG_FILE_NAME}',
     CELL: f'{CFG_DIR[CELL]}/{CONFIG_FILE_NAME}',
+    COCO: f'{CFG_DIR[COCO]}/{CONFIG_FILE_NAME}',
 }
 BEST_CFG_FILE_PATH = {
     ML1M: f'{BEST_CFG_DIR[ML1M]}/{CONFIG_FILE_NAME}',
     LFM1M: f'{BEST_CFG_DIR[LFM1M]}/{CONFIG_FILE_NAME}',
     CELL: f'{BEST_CFG_DIR[CELL]}/{CONFIG_FILE_NAME}',
+    COCO: f'{BEST_CFG_DIR[COCO]}/{CONFIG_FILE_NAME}',
 }
 
 HPARAMS_FILE = f'{MODEL}_hparams_file.json'
@@ -84,12 +93,14 @@ TMP_DIR = {
     ML1M: f'{DATA_DIR[ML1M]}/tmp',
     LFM1M: f'{DATA_DIR[LFM1M]}/tmp',
     CELL: f'{DATA_DIR[CELL]}/tmp',
+    COCO: f'{DATA_DIR[COCO]}/tmp',
 }
 
 LABEL_FILE = {
     ML1M: (DATA_DIR[ML1M] + '/train.txt.gz', DATA_DIR[ML1M] + '/valid.txt.gz', DATA_DIR[ML1M] + '/test.txt.gz'),
     LFM1M: (DATA_DIR[LFM1M] + '/train.txt.gz', DATA_DIR[LFM1M] + '/valid.txt.gz', DATA_DIR[LFM1M] + '/test.txt.gz'),
     CELL: (DATA_DIR[CELL] + '/train.txt.gz', DATA_DIR[CELL] + '/valid.txt.gz', DATA_DIR[CELL] + '/test.txt.gz'),
+    COCO: (DATA_DIR[COCO] + '/train.txt.gz', DATA_DIR[COCO] + '/valid.txt.gz', DATA_DIR[COCO] + '/test.txt.gz'),
 }
 
 
@@ -120,6 +131,7 @@ def parse_args():
     parser.add_argument('--do_execute', type=boolean, default=True, help='whether to execute neural programs.')
     parser.add_argument('--do_validation', type=bool, default=True, help='Whether to perform validation')
     parser.add_argument("--wandb", action="store_true", help="If passed, will log to Weights and Biases.")
+    parser.add_argument("--save_interval", default=10, type=int, help="Interval to save model weights.")
     parser.add_argument(
         "--wandb_entity",
         required="--wandb" in sys.argv,
