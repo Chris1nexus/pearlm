@@ -16,6 +16,8 @@ if __name__ == '__main__':
     parser.add_argument('--decoding_strategy', default='gcd', type=str, help='')
     args = parser.parse_args()
 
+    if 'plm-rec' in args.model:
+        args.model = f'end-to-end@{args.dataset}@{args.model}@{args.sample_size}@{args.n_hop}@{args.k}@'
     if args.model in ['distilgpt2', 'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl']:
         args.model = f'end-to-end@{args.dataset}@{args.model}@{args.sample_size}@{args.n_hop}@{args.decoding_strategy}'
     result_dir =  get_result_dir(args.dataset, args.model)
