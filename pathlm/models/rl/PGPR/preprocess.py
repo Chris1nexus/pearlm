@@ -26,7 +26,7 @@ def main():
     print('Load', args.dataset, 'dataset from file...')
     if not os.path.isdir(TMP_DIR[args.dataset]):
         os.makedirs(TMP_DIR[args.dataset])
-    dataset = KARSDataset(args)
+    dataset = KARSDataset(args.dataset)
     save_dataset(args.dataset, dataset)
     # Generate knowledge graph instance.
     # ========== BEGIN ========== #
