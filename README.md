@@ -2,6 +2,13 @@
 This repository contains the source code of the submitted paper "PERLM: Faithful Path-Based Explainable Recommendation via Language
 Modeling over Knowledge Graphs".
 
+If this repository IS useful for your research, we would appreciate an acknowledgment by citing our paper:
+
+```
+Balloccu, Giacomo, Ludovico Boratto, Christian Cancedda, Gianni Fenu, and Mirko Marras. 
+"Faithful Path Language Modelling for Explainable Recommendation over Knowledge Graph." arXiv preprint arXiv:2310.16452 (2023).
+```
+
 ## Requirements
 - Python 3.8
 
