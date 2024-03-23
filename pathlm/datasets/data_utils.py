@@ -1,4 +1,5 @@
 import csv
+import gzip
 import os
 from collections import defaultdict
 from typing import Dict, List
@@ -65,6 +66,22 @@ def get_eid_to_name(dataset_name: str) -> Dict[str, str]:
             eid, name = row[:2]
             eid2name[eid] = ' '.join(name.split('_'))
     return eid2name
+
+def get_local_eid_to_name(dataset: str) -> Dict[str, Dict[str, str]]:
+    """
+    Return a dict where the keys are the type of entity and values are dicts that map local id the name of the entity
+    Requires CAFE map_dataset.py execution
+    """
+    entity2plain_text_map = defaultdict(dict)
+    with gzip.open(f"data/{dataset}/preprocessed/cafe/kg_entities.txt.gz", 'rt') as entities_file:
+        reader = csv.reader(entities_file, delimiter="\t")
+        next(reader, None)
+        for row in reader:
+            row[1] = row[1].split("_")
+            entity_type, local_id = '_'.join(row[1][:-1]), row[1][-1]
+            entity2plain_text_map[entity_type][int(local_id)] = row[-1]
+    entities_file.close()
+    return entity2plain_text_map
 
 
 def get_rid_to_name(dataset_name: str) -> Dict[str, str]:
