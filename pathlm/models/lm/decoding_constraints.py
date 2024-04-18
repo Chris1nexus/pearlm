@@ -203,7 +203,7 @@ Constraint decoding strategy for PLM, it forces the model to generate alternativ
 """
 class PLMLogitsProcessorWordLevel(LogitsProcessor):
     def __init__(self, tokenized_kg, force_token_map, total_length, tokenizer, num_return_sequences,
-                 id_to_uid_token_map, eos_token_ids, ent_mask, rel_mask, token_id_to_token,  **kwargs):
+                 id_to_uid_token_map, eos_token_ids, ent_mask, rel_mask, token_id_to_token,  mask_cache_size=3*10**4, cand_cache_size=1*10**5,**kwargs):
         super().__init__(**kwargs)
         self.ent_ids = [idx for idx, elem in enumerate(ent_mask) if elem > 0]
         self.rel_ids = [idx for idx, elem in enumerate(rel_mask) if elem > 0]
@@ -223,7 +223,8 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
         self.call_counter_to_process_finished_sequence = 0
         self.eos_token_ids = eos_token_ids
         self.vocab_tokens = [i for i in range(len(self.tokenizer.get_vocab()))]
-
+        self.cache = LFUCache(cand_cache_size)
+        self.mask_cache = LFUCache(mask_cache_size)
 
     def __call__(self, input_ids, scores):
         cur_len = input_ids.shape[-1]
@@ -233,58 +234,29 @@ class PLMLogitsProcessorWordLevel(LogitsProcessor):
             for i in self.eos_token_ids: 
                 scores[:, i] = 0.
         else:
-            mask = torch.full_like(scores, -math.inf).to(scores.device)
+            #mask = torch.full_like(scores, -math.inf).to(scores.device)
+            mask_list = []
             for idx in range(scores.shape[0]):
                 cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
                 if cur_len % 2 == 1:
                         # parse ent -----> candidate relations
                         candidate_tokens = self.ent_ids
+                        key = 1
                         if cur_len == self.total_length - 1: # Remove from candidates products not in user negatives
                             candidate_tokens = self.force_token_map[cur_uid]
-                        key = cur_uid,idx
+                            key = cur_uid,idx
                 else:
                     candidate_tokens = self.rel_ids
-                    key = idx
+                    key = 0 #idx
 
-                #if key not in self.mask_cache:
-                #    mask = np.isin(self.vocab_tokens, candidate_tokens)
-                #    self.mask_cache[key] = mask
+                banned_mask = self.mask_cache.get(key)
+                if banned_mask is None:
+                    banned_mask = np.isin(self.vocab_tokens, candidate_tokens, invert=True) #init_mask(len(self.vocab_tokens), candidate_tokens)
+                    self.mask_cache.put(key, banned_mask)
 
-                #candidate_tokens = self.mask_cache[key]
-                #mask[idx, candidate_tokens] = 0.
-                mask[idx, candidate_tokens] = scores[idx, candidate_tokens]
-            #scores = scores + mask
-            scores = mask
-        '''
-        min_score = scores.min()
-        if cur_len == self.total_length:
-            num_tokens = scores.shape[1]
-            scores[:, [i for i in range(num_tokens) if i not in self.eos_token_ids]] = min_score  # float("-Inf")
-            for i in self.eos_token_ids:
-                scores[:, i] = 0.
-        else:
-            mask_list = []
-            
-            for idx in range(scores.shape[0]):
-                cur_uid = self.id_to_uid_token_map[input_ids[idx, 1].item()]
-                if cur_len % 2 == 1:
-                    # parse ent -----> candidate relations
-                    candidate_tokens = self.ent_ids
-                    if cur_len == self.total_length - 1: # Remove from candidates products not in user negatives
-                        candidate_tokens = self.force_token_map[cur_uid]
-                    key = cur_uid,idx
+                mask_list.append(banned_mask)
 
-                else:
-                    candidate_tokens = self.rel_ids
-                    key = idx
-                if key not in self.mask_cache:
-                    mask = np.isin(self.vocab_tokens, candidate_tokens)
-                    self.mask_cache[key] = mask
-                mask = self.mask_cache[key]
-                mask_list.append(mask)
+            banned_tokens_mask = np.vstack(mask_list)
+            scores[banned_tokens_mask] = -math.inf   
 
-            mask = np.vstack(mask_list)
-            scores[~mask] = min_scorea
-        '''
-        #Set to min score the tokens which are not in force_tokens_map[cur_uid] at this position
         return scores
