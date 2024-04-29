@@ -5,8 +5,7 @@ Modeling over Knowledge Graphs".
 If this repository IS useful for your research, we would appreciate an acknowledgment by citing our paper:
 
 ```
-Balloccu, Giacomo, Ludovico Boratto, Christian Cancedda, Gianni Fenu, and Mirko Marras. 
-"Faithful Path Language Modelling for Explainable Recommendation over Knowledge Graph." arXiv preprint arXiv:2310.16452 (2023).
+"Faithful Path Language Modeling for Explainable Recommendation over Knowledge Graph." arXiv preprint arXiv:2310.16452 (2023).
 ```
 
 ## Requirements
