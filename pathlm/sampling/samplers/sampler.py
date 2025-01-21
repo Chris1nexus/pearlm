@@ -71,8 +71,17 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                     continue 
                 candidates = kg[cur_ent_t][cur_ent_id][rel][cand_type]
 
+                #'''
                 if cur_hop == n_hop-1 and end_ent_type == PROD_ENT:
-                    cache_key = (uid, rel, cand_type)
+                    #cache_key = (uid, rel, cand_type)
+                    cache_key = (uid, rel, cur_ent_t, cur_ent_id)
+                    
+                    '''
+                    if itemset_type == 'inner':
+                        candidates = list(user_dict[uid].intersection(set(candidates)))
+                    else:
+                        raise NotImplementedError
+                    '''
                     if itemset_type == 'inner':
                         if cache_key not in user_prod_cache:
                             candidates = list(user_dict[uid].intersection(set(candidates)))
@@ -90,14 +99,14 @@ def random_walk_typified(uid, dataset_name, kg, items, n_hop, KG2T, R2T, USER_EN
                         pass
                     else:
                         continue
-
+                    #'''
                     ent_t = None
                     if cur_ent_t == USER_ENT:
                         ent_t = USER_ENT
                     else:
                         ent_t = EXT_ENT
                     key = uid, rel_id, ent_t, cur_ent_id
-
+                #'''
                 if len(candidates) == 0:
                     continue         
                 if with_type:    
@@ -386,12 +395,37 @@ class KGsampler:
         
         # undirected knowledge graph hypotesis (for each relation, there exists its inverse)
 
+        kg = self.aug_kg
+
+
+        import copy
+        kg = copy.deepcopy(self.aug_kg)
+        
+        for uid in kg[USER]:
+            kg[USER][uid][U2P_REL][PRODUCT] = list(self.train_user_dict[uid])
+        for pid in kg[PRODUCT]:
+            uids = kg[PRODUCT][pid][U2P_REL][USER] #= list(self.train_user_dict[uid])      
+            valid_uids = []
+            for uid in uids:
+                if pid in self.valid_user_dict[uid] or pid in self.test_user_dict[uid]:   
+                    continue
+                valid_uids.append(uid)
+            kg[PRODUCT][pid][U2P_REL][USER] = valid_uids
+        import pickle
+        with open('kg_clean.pkl', 'wb') as f:
+            pickle.dump(kg, f)
+        with open('kg.pkl', 'wb') as f:
+            pickle.dump(self.aug_kg, f)            
+            
+
+        #candidate_types = kg[USER][cur_ent_id][rel]
+        
         #with mp.Pool(nproc) as pool:
         #    pool.starmap( functools.partial(func,   
         for uid in tqdm(list(self.user_dict) ) :       
             func(uid,                                                       
                 dataset_name=self.dataset_name,
-                kg=self.aug_kg, 
+                kg=kg, 
                 items=self.items, n_hop=max_hop, KG2T=self.kg2t, R2T=self.rel_id2type, 
                                 USER_ENT=USER, PROD_ENT=PROD_ENT, EXT_ENT=ENTITY, 
                                 U2P_REL=U2P_REL,
